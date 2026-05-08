@@ -76,7 +76,7 @@
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': forecastMgrSelectedManagers.includes(item) }"
-                  @click="onMgrManagerDropdownPick(item)"
+                  @mousedown.prevent="onMgrManagerDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -115,7 +115,7 @@
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': forecastMgrSelectedSmelters.includes(item) }"
-                  @click="onMgrSmelterDropdownPick(item)"
+                  @mousedown.prevent="onMgrSmelterDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -229,7 +229,7 @@
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': forecastWhSelectedWarehouses.includes(item) }"
-                  @click="onWhWarehouseDropdownPick(item)"
+                  @mousedown.prevent="onWhWarehouseDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -268,7 +268,7 @@
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': forecastWhSelectedManagers.includes(item) }"
-                  @click="onWhManagerDropdownPick(item)"
+                  @mousedown.prevent="onWhManagerDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -307,7 +307,7 @@
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': forecastWhSelectedSmelters.includes(item) }"
-                  @click="onWhSmelterDropdownPick(item)"
+                  @mousedown.prevent="onWhSmelterDropdownPick(item)"
                 >
                   {{ item }}
                 </div>

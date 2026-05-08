@@ -139,11 +139,11 @@
                 />
               </div>
               <div v-show="managerDropdownVisible && filteredManagerOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredManagerOptions" 
+                <div
+                  v-for="item in filteredManagerOptions"
                   :key="item"
                   class="dropdown-item"
-                  @click="addManager(item)"
+                  @mousedown.prevent="addManager(item)"
                 >
                   {{ item }}
                 </div>
@@ -173,11 +173,11 @@
                 />
               </div>
               <div v-show="smelterDropdownVisible && filteredSmelterOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredSmelterOptions" 
+                <div
+                  v-for="item in filteredSmelterOptions"
                   :key="item"
                   class="dropdown-item"
-                  @click="addSmelter(item)"
+                  @mousedown.prevent="addSmelter(item)"
                 >
                   {{ item }}
                 </div>
@@ -207,11 +207,11 @@
                 />
               </div>
               <div v-show="warehouseDropdownVisible && filteredWarehouseOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredWarehouseOptions" 
+                <div
+                  v-for="item in filteredWarehouseOptions"
                   :key="item"
                   class="dropdown-item"
-                  @click="addWarehouse(item)"
+                  @mousedown.prevent="addWarehouse(item)"
                 >
                   {{ item }}
                 </div>
@@ -241,11 +241,11 @@
                 />
               </div>
               <div v-show="varietyDropdownVisible && filteredVarietyOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredVarietyOptions" 
+                <div
+                  v-for="item in filteredVarietyOptions"
                   :key="item"
                   class="dropdown-item"
-                  @click="addVariety(item)"
+                  @mousedown.prevent="addVariety(item)"
                 >
                   {{ item }}
                 </div>

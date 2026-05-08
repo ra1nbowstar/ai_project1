@@ -62,12 +62,12 @@
                 />
               </div>
               <div v-show="managerDropdownVisible && filteredManagerOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredManagerOptions" 
+                <div
+                  v-for="item in filteredManagerOptions"
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': managerSelectedManagers.includes(item) }"
-                  @click="onManagerDropdownPick(item)"
+                  @mousedown.prevent="onManagerDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -102,12 +102,12 @@
                 />
               </div>
               <div v-show="smelterDropdownVisible && filteredSmelterOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredSmelterOptions" 
+                <div
+                  v-for="item in filteredSmelterOptions"
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': managerSelectedSmelters.includes(item) }"
-                  @click="onSmelterDropdownPick(item)"
+                  @mousedown.prevent="onSmelterDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -207,12 +207,12 @@
                 />
               </div>
               <div v-show="warehouseDropdownVisible && filteredWarehouseOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredWarehouseOptions" 
+                <div
+                  v-for="item in filteredWarehouseOptions"
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': warehouseSelectedWarehouses.includes(item) }"
-                  @click="onWarehouseDropdownPick(item)"
+                  @mousedown.prevent="onWarehouseDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -247,12 +247,12 @@
                 />
               </div>
               <div v-show="warehouseManagerDropdownVisible && filteredWarehouseManagerOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredWarehouseManagerOptions" 
+                <div
+                  v-for="item in filteredWarehouseManagerOptions"
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': warehouseSelectedManagers.includes(item) }"
-                  @click="onWarehouseManagerDropdownPick(item)"
+                  @mousedown.prevent="onWarehouseManagerDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
@@ -287,12 +287,12 @@
                 />
               </div>
               <div v-show="warehouseSmelterDropdownVisible && filteredWarehouseSmelterOptions.length > 0" class="dropdown-list">
-                <div 
-                  v-for="item in filteredWarehouseSmelterOptions" 
+                <div
+                  v-for="item in filteredWarehouseSmelterOptions"
                   :key="item"
                   class="dropdown-item"
                   :class="{ 'dropdown-item--selected': warehouseSelectedSmelters.includes(item) }"
-                  @click="onWarehouseSmelterDropdownPick(item)"
+                  @mousedown.prevent="onWarehouseSmelterDropdownPick(item)"
                 >
                   {{ item }}
                 </div>
