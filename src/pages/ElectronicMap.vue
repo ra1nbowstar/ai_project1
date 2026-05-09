@@ -13,7 +13,7 @@
         </button>
         <span class="emap-title emap-title--compact">
           <i class="bi bi-map"></i>
-          废铅蓄电池供应链成本优化服务系统
+          废铅蓄电池供应链服务系统
         </span>
         <button
           type="button"
@@ -42,7 +42,7 @@
               <div class="emap-toolbar-heading-text">
                 <span class="emap-title">
                   <i class="bi bi-map"></i>
-                  废铅蓄电池供应链成本优化服务系统
+                  废铅蓄电池供应链服务系统
                 </span>
                 <span class="emap-toolbar-hint text-muted small"
                   >请先在下方选择<strong>比价类型</strong>并为品类填写<strong>吨数</strong>（至少一项
@@ -359,7 +359,7 @@
             <div class="emap-cmp-summary-value">¥ {{ formatNum(comparisonSummary.bestUnitPrice) }}</div>
           </div>
           <div class="emap-cmp-summary-card">
-            <div class="emap-cmp-summary-label">总利润</div>
+            <div class="emap-cmp-summary-label">总货值</div>
             <div class="emap-cmp-summary-value">¥ {{ formatNum(comparisonSummary.bestProfit) }}</div>
           </div>
           <div class="emap-cmp-summary-card">
@@ -378,12 +378,13 @@
                 <th class="emap-cmp-col-cats">各品种单价</th>
                 <th class="emap-cmp-col-money">总回收价</th>
                 <th class="emap-cmp-col-money">总运费</th>
-                <th class="emap-cmp-col-money">利润</th>
+                <th class="emap-cmp-col-money">货值</th>
+                <th class="emap-cmp-col-money">每吨货值</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!comparisonRanks.length">
-                <td colspan="8" class="text-center text-muted py-3 emap-cmp-table-empty">
+                <td colspan="9" class="text-center text-muted py-3 emap-cmp-table-empty">
                   暂无比价明细
                 </td>
               </tr>
@@ -517,6 +518,20 @@
                     "
                     >{{ formatComparisonNetProfitCell(row) }}</span>
                 </td>
+                <td class="emap-cmp-col-money">
+                  <span
+                    class="emap-cmp-cell-truncate"
+                    tabindex="0"
+                    role="button"
+                    title="点击查看完整内容"
+                    @click.stop="
+                      openComparisonCellDetail('每吨货值', formatValuePerTonCell(row))
+                    "
+                    @keydown.enter.prevent="
+                      openComparisonCellDetail('每吨货值', formatValuePerTonCell(row))
+                    "
+                    >{{ formatValuePerTonCell(row) }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -576,6 +591,18 @@
               class="emap-legend-stat-row"
               :title="row.label"
             >
+              <button
+                type="button"
+                class="emap-legend-eye-btn"
+                :title="hiddenWarehouseTypes.has(row.label) ? '显示该类型' : '隐藏该类型'"
+                @click.stop="toggleWarehouseTypeVisibility(row.label)"
+              >
+                <i
+                  class="bi"
+                  :class="hiddenWarehouseTypes.has(row.label) ? 'bi-eye-slash' : 'bi-eye'"
+                  aria-hidden="true"
+                />
+              </button>
               <span
                 class="emap-legend-stat-dot"
                 :style="{ background: row.color, boxShadow: `0 0 6px ${row.color}88` }"
@@ -1190,6 +1217,33 @@ const warehouseTypeStats = computed((): WarehouseTypeStatRow[] => {
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'))
 })
 
+function toggleWarehouseTypeVisibility(label: string) {
+  const s = new Set(hiddenWarehouseTypes.value)
+  if (s.has(label)) s.delete(label)
+  else s.add(label)
+  hiddenWarehouseTypes.value = s
+  applyWarehouseTypeVisibility()
+}
+
+function applyWarehouseTypeVisibility() {
+  const markerLayer = markerLayerRef.value
+  if (!markerLayer) return
+  const hidden = hiddenWarehouseTypes.value
+  for (const p of allWarehousePoints.value) {
+    const m = warehouseMarkerById.get(p.id)
+    if (!m) continue
+    const typeName =
+      pickStr(p.raw, ['类型', 'type', 'warehouse_type_name', '类型名']).trim() || '未分类'
+    const markerLatLng = m.getLatLng()
+    const isOnMap = markerLatLng != null && mapRef.value?.hasLayer(m)
+    if (hidden.has(typeName)) {
+      if (isOnMap) m.remove()
+    } else {
+      if (!isOnMap) m.addTo(markerLayer)
+    }
+  }
+}
+
 function syncEmapFullscreenFlag() {
   const shell = emapShellRef.value
   const fs =
@@ -1232,6 +1286,8 @@ function onEmapFullscreenChange() {
   void nextTick(() => mapRef.value?.invalidateSize())
 }
 const allSmelterPoints = ref<MapPoint[]>([])
+/** 隐藏的库房类型标签集合 */
+const hiddenWarehouseTypes = ref<Set<string>>(new Set())
 
 /** 库房 id → 标记，用于选中时把其余库房变浅 */
 const warehouseMarkerById = new Map<string, L.Marker>()
@@ -2029,6 +2085,7 @@ function renderMarkers(points: MapPoint[]) {
   }
 
   refreshAllMarkerVisualState()
+  applyWarehouseTypeVisibility()
 
   const bounds = L.latLngBounds([])
   for (const p of points) bounds.extend([p.lat, p.lng])
@@ -2584,6 +2641,12 @@ function formatComparisonCategoryPricesPlain(row: ComparisonRankItem): string {
 
 function formatComparisonNetProfitCell(row: ComparisonRankItem): string {
   return `¥ ${toDisplayNum(row.netProfit).toLocaleString('zh-CN')}`
+}
+
+function formatValuePerTonCell(row: ComparisonRankItem): string {
+  if (!row.qtySum || row.qtySum <= 0 || !Number.isFinite(row.netProfit)) return '—'
+  const perTon = row.netProfit / row.qtySum
+  return `¥ ${toDisplayNum(perTon).toLocaleString('zh-CN')}`
 }
 
 function comparisonXunRongBaoTitle(row: ComparisonRankItem): string {
@@ -5657,12 +5720,29 @@ onBeforeUnmount(() => {
 
 .emap-legend-stat-row {
   display: grid;
-  grid-template-columns: 14px 1fr auto;
+  grid-template-columns: 18px 14px 1fr auto;
   align-items: center;
   gap: 6px;
   font-size: 11px;
   line-height: 1.35;
   color: #cbd5e1;
+}
+
+.emap-legend-eye-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emap-legend-eye-btn:hover {
+  color: #e2e8f0;
 }
 
 .emap-legend-stat-dot {

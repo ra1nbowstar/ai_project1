@@ -3,7 +3,7 @@
     <header class="top-nav">
       <div class="top-nav-inner">
         <div class="title-group">
-          <h1 class="title">废铅蓄电池供应链成本优化服务系统</h1>
+          <h1 class="title">废铅蓄电池供应链服务系统</h1>
         </div>
         <div class="module-tabs">
           <button
