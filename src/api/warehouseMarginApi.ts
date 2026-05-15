@@ -1,6 +1,5 @@
 import { fetchJson } from './userApi'
 import { getToken } from './authApi'
-import { getApiBase } from './config'
 
 export interface WarehouseMarginRow {
   id: number
@@ -21,21 +20,13 @@ export interface WarehouseMarginForm {
   margin: number
 }
 
-interface ApiResp<T> {
-  code?: number
-  message?: string
-  data?: T
-}
-
 function authHeaders(): HeadersInit {
   const token = getToken()
   if (!token) return {}
   return { Authorization: `Bearer ${token}` }
 }
 
-function baseUrl(): string {
-  return `${getApiBase()}/warehouse-margin`
-}
+const BASE = '/tl/warehouse_spread_configs'
 
 function readMsg(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
@@ -45,6 +36,18 @@ function readMsg(data: unknown): string {
   return ''
 }
 
+function pickRow(r: Record<string, unknown>): WarehouseMarginRow {
+  return {
+    id: Number(r.config_id ?? r.id ?? 0),
+    province: String(r['库房省份'] ?? r['省份'] ?? r.province ?? ''),
+    city: String(r['库房城市'] ?? r['城市'] ?? r.city ?? ''),
+    warehouse_name: String(r['库房名称'] ?? r['仓库名称'] ?? r['仓库名'] ?? r.warehouse_name ?? ''),
+    benchmark_city: String(r['对标城市'] ?? r.benchmark_city ?? ''),
+    benchmark_diff: Number(r['对标城市差额'] ?? r['对标差额'] ?? r.benchmark_diff ?? 0),
+    margin: Number(r['毛利（配置版）'] ?? r['毛利配置版'] ?? r['毛利'] ?? r.margin ?? 0),
+  }
+}
+
 export async function fetchWarehouseMargins(params?: {
   province?: string
   city?: string
@@ -52,67 +55,68 @@ export async function fetchWarehouseMargins(params?: {
   page_size?: number
 }): Promise<{ items: WarehouseMarginRow[]; total: number }> {
   const q = new URLSearchParams()
-  if (params?.province) q.set('province', params.province)
-  if (params?.city) q.set('city', params.city)
   q.set('page', String(params?.page ?? 1))
   q.set('page_size', String(params?.page_size ?? 20))
 
-  const { res, data } = await fetchJson(`${baseUrl()}?${q.toString()}`, {
+  const { res, data } = await fetchJson(`${BASE}?${q.toString()}`, {
     method: 'GET',
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(readMsg(data) || `获取库房差价和毛利列表失败（HTTP ${res.status}）`)
 
-  const payload = (data || {}) as ApiResp<{ items?: WarehouseMarginRow[]; total?: number }>
+  const payload = (data || {}) as Record<string, unknown>
   const inner = (payload.data ?? payload) as Record<string, unknown>
-  const list =
-    (Array.isArray(inner.items) ? inner.items : null) ??
-    (Array.isArray(inner.list) ? inner.list : null) ??
-    (Array.isArray(inner.records) ? inner.records : null) ??
-    []
+  const rawList = Array.isArray(inner.list) ? inner.list : []
+  let items = rawList
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+    .map(pickRow)
+
+  if (params?.province) items = items.filter((r) => r.province === params.province)
+  if (params?.city) items = items.filter((r) => r.city.includes(params.city!))
+
   return {
-    items: list as WarehouseMarginRow[],
-    total: typeof inner.total === 'number' ? inner.total : list.length,
+    items,
+    total: typeof inner.total === 'number' ? inner.total : items.length,
   }
 }
 
-export async function createWarehouseMargin(body: WarehouseMarginForm): Promise<WarehouseMarginRow> {
-  const { res, data } = await fetchJson(baseUrl(), {
+export async function createWarehouseMargin(body: WarehouseMarginForm & { warehouse_id?: number }): Promise<WarehouseMarginRow> {
+  const payload: Record<string, unknown> = {}
+  if (body.warehouse_id && body.warehouse_id > 0) payload['库房id'] = body.warehouse_id
+  if (body.benchmark_city) payload['对标城市'] = body.benchmark_city
+  if (body.benchmark_diff != null) payload['对标城市差额'] = body.benchmark_diff
+  if (body.margin != null) payload['毛利配置版'] = body.margin
+  const { res, data } = await fetchJson(BASE, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(readMsg(data) || `新增库房差价和毛利失败（HTTP ${res.status}）`)
-  const payload = (data || {}) as ApiResp<WarehouseMarginRow>
-  return payload.data ?? (data as WarehouseMarginRow)
+  return { id: 0, ...body }
 }
 
 export async function updateWarehouseMargin(id: number, body: WarehouseMarginForm): Promise<WarehouseMarginRow> {
-  const { res, data } = await fetchJson(`${baseUrl()}/${id}`, {
+  const payload: Record<string, unknown> = {}
+  if (body.benchmark_city) payload['对标城市'] = body.benchmark_city
+  if (body.benchmark_diff != null) payload['对标城市差额'] = body.benchmark_diff
+  if (body.margin != null) payload['毛利配置版'] = body.margin
+  const { res, data } = await fetchJson(`${BASE}/${id}`, {
     method: 'PUT',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(readMsg(data) || `修改库房差价和毛利失败（HTTP ${res.status}）`)
-  const payload = (data || {}) as ApiResp<WarehouseMarginRow>
-  return payload.data ?? (data as WarehouseMarginRow)
+  return { id, ...body }
 }
 
 export async function deleteWarehouseMargin(id: number): Promise<void> {
-  const { res, data } = await fetchJson(`${baseUrl()}/${id}`, {
+  const { res, data } = await fetchJson(`${BASE}/${id}`, {
     method: 'DELETE',
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(readMsg(data) || `删除库房差价和毛利失败（HTTP ${res.status}）`)
 }
 
-export async function importWarehouseMargins(file: File): Promise<void> {
-  const form = new FormData()
-  form.append('file', file)
-  const { res, data } = await fetchJson(`${baseUrl()}/import`, {
-    method: 'POST',
-    headers: { ...authHeaders() },
-    body: form,
-  })
-  if (!res.ok) throw new Error(readMsg(data) || `导入失败（HTTP ${res.status}）`)
+export async function importWarehouseMargins(_file: File): Promise<void> {
+  throw new Error('导入功能暂未对接新接口，请手动添加数据')
 }

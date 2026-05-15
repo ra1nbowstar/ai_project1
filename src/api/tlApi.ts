@@ -192,6 +192,12 @@ export async function fetchTlSmelters(): Promise<Record<string, unknown>[]> {
   return unwrapList(raw)
 }
 
+export async function searchTlWarehouses(query: string, page = 1, size = 20): Promise<Record<string, unknown>[]> {
+  const q = new URLSearchParams({ keyword: query, page: String(page), size: String(size) })
+  const raw = await tlGetJson(`/tl/get_warehouses?${q.toString()}`)
+  return unwrapList(raw)
+}
+
 /** 用于库房列表「颜色」与地图打点配色（类型 id → 颜色配置） */
 export async function fetchTlWarehouseTypes(includeInactive = false): Promise<Record<string, unknown>[]> {
   const q = includeInactive ? 'true' : 'false'

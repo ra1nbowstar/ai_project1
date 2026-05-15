@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(grep -oP 'module-card[^`]*' \"c:/Users/ysc02/Desktop/ai_project1/public/embedded/price_system/index.html\")",
-      "Bash(grep -oP '`[^`]*template[^`]*`' \"c:/Users/ysc02/Desktop/ai_project1/public/embedded/price_system/assets/app-BZHDhlyu.js\")"
+      "Bash(grep -oP '`[^`]*template[^`]*`' \"c:/Users/ysc02/Desktop/ai_project1/public/embedded/price_system/assets/app-BZHDhlyu.js\")",
+      "Bash(curl -s \"https://redspiderbc.cn/api/ai-pricing/benchmark-cities\" -H \"Authorization: Bearer test\")",
+      "Bash(curl -s \"https://redspiderbc.cn/api/v1/ai-pricing/benchmark-cities\")",
+      "Bash(curl -s \"https://redspiderbc.cn/api/v1/benchmark-cities\")",
+      "WebFetch(domain:118.25.96.187)",
+      "Bash(curl -s -X DELETE \"http://118.25.96.187:8001/tl/warehouse_spread_configs/1\")",
+      "Bash(node -e ' *)",
+      "Bash(grep -o '<div[^>]*freight-filter-warehouse[^\"]*\"[^>]*>.\\\\{0,500\\\\}')"
     ]
   }
 }

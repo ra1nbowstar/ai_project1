@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(printf '{\"库房id\":909,\"对标城市\":\"青岛市\",\"对标城市差额\":50,\"毛利配置版\":100}')",
+      "Bash(curl -s -X POST \"http://118.25.96.187:8001/tl/warehouse_spread_configs\" -H \"Content-Type: application/json\" -d @/tmp/wf.json)"
+    ]
+  }
+}

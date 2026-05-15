@@ -172,11 +172,6 @@
               <option v-for="p in provinceOptions" :key="p" :value="p">{{ p }}</option>
             </select>
             <input
-              v-model.trim="filterCity"
-              class="form-control filter-input"
-              placeholder="按城市筛选"
-            />
-            <input
               v-model="filterDate"
               type="date"
               class="form-control filter-input"
@@ -247,7 +242,10 @@
           <div class="form-card-body">
             <div class="form-field">
               <label class="form-label">省份</label>
-              <input v-model.trim="form.province" class="form-control" placeholder="请输入省份" />
+              <select v-model="form.province" class="form-control">
+                <option value="">请选择省份</option>
+                <option v-for="p in provinceOptions" :key="p" :value="p">{{ p }}</option>
+              </select>
             </div>
             <div class="form-field">
               <label class="form-label">对标城市</label>
@@ -288,7 +286,11 @@
           返回
         </button>
         <h3 class="sub-page-title">冶炼厂标定价格</h3>
-        <div class="header-actions">
+        <div class="header-actions" style="display:flex; gap:8px;">
+          <button class="btn add-btn" @click="openSmelterAdd">
+            <i class="bi bi-plus-lg me-1"></i>
+            新增
+          </button>
           <button class="btn add-btn" @click="showHistory = true">
             <i class="bi bi-clock-history me-1"></i>
             历史记录
@@ -368,6 +370,49 @@
         </div>
       </div>
 
+      <!-- 新增标定价格弹窗 -->
+      <div v-if="showSmelterAddForm" class="form-mask" @click.self="showSmelterAddForm = false">
+        <div class="form-card">
+          <div class="form-card-header">
+            <h6>新增标定价格</h6>
+            <button class="form-close-btn" @click="showSmelterAddForm = false">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <div class="form-card-body">
+            <div class="form-field">
+              <label class="form-label">冶炼厂</label>
+              <select v-model.number="smelterAddForm.smelter_id" class="form-control">
+                <option :value="0">请选择冶炼厂</option>
+                <option v-for="s in smelterOptions" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label">标定价格</label>
+              <input
+                v-model.number="smelterAddForm.price"
+                type="number"
+                step="0.01"
+                min="0"
+                class="form-control"
+                placeholder="请输入标定价格"
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label">日期</label>
+              <input v-model="smelterAddForm.date" type="date" class="form-control" />
+            </div>
+            <div v-if="smelterAddError" class="alert alert-warning py-2 mb-2">{{ smelterAddError }}</div>
+          </div>
+          <div class="form-card-footer">
+            <button class="btn form-btn-cancel" @click="showSmelterAddForm = false">取消</button>
+            <button class="btn form-btn-submit" :disabled="smelterAddLoading" @click="submitSmelterAdd">
+              {{ smelterAddLoading ? '提交中…' : '确定' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 历史记录弹窗 -->
       <div v-if="showHistory" class="form-mask" @click.self="showHistory = false">
         <div class="form-card history-card">
@@ -382,23 +427,21 @@
               <thead>
                 <tr>
                   <th>标定价格</th>
-                  <th>操作人</th>
                   <th>更改时间</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="historyLoading">
-                  <td colspan="3" class="text-center py-4">
+                  <td colspan="2" class="text-center py-4">
                     <span class="spinner-border spinner-border-sm me-2"></span>
                     加载中…
                   </td>
                 </tr>
                 <tr v-else-if="historyData.length === 0">
-                  <td colspan="3" class="text-center py-4 text-muted">暂无记录</td>
+                  <td colspan="2" class="text-center py-4 text-muted">暂无记录</td>
                 </tr>
                 <tr v-for="item in historyData" :key="item.id">
                   <td>{{ item.price.toFixed(2) }}</td>
-                  <td>{{ item.operator }}</td>
                   <td>{{ item.change_time }}</td>
                 </tr>
               </tbody>
@@ -515,33 +558,55 @@
           <div class="form-card-body">
             <div class="form-field">
               <label class="form-label">省份</label>
-              <select v-model="marginForm.province" class="form-control">
+              <select v-model="marginForm.province" class="form-control" :disabled="!!marginEditing">
                 <option value="">请选择省份</option>
                 <option v-for="p in provinceOptions" :key="p" :value="p">{{ p }}</option>
               </select>
             </div>
             <div class="form-field">
               <label class="form-label">城市</label>
-              <input v-model.trim="marginForm.city" class="form-control" placeholder="请输入城市" />
+              <input v-model.trim="marginForm.city" class="form-control" placeholder="请输入城市" :disabled="!!marginEditing" />
             </div>
             <div class="form-field">
               <label class="form-label">库房名称</label>
               <div class="search-select" ref="warehouseSelectRef">
-                <input
-                  v-model.trim="marginForm.warehouse_name"
-                  class="form-control"
-                  placeholder="搜索或输入库房名称"
-                  @focus="showWarehouseDropdown = true"
-                  @input="showWarehouseDropdown = true"
-                />
-                <div v-if="showWarehouseDropdown && filteredWarehouseNames.length" class="search-select-dropdown">
-                  <div
-                    v-for="w in filteredWarehouseNames"
-                    :key="w"
-                    class="search-select-item"
-                    @mousedown.prevent="marginForm.warehouse_name = w; showWarehouseDropdown = false"
-                  >
-                    {{ w }}
+                <div
+                  class="form-control search-select-trigger"
+                  :class="{ 'is-disabled': !!marginEditing }"
+                  @click="!marginEditing && toggleWarehouseDropdown()"
+                >
+                  <span v-if="marginForm.warehouse_name">{{ marginForm.warehouse_name }}</span>
+                  <span v-else class="text-muted">请选择库房</span>
+                  <i class="bi bi-chevron-down search-select-arrow" :class="{ open: showWarehouseDropdown }"></i>
+                </div>
+                <div v-if="showWarehouseDropdown" class="search-select-dropdown">
+                  <div class="search-select-search">
+                    <i class="bi bi-search"></i>
+                    <input
+                      ref="warehouseSearchInputRef"
+                      v-model.trim="warehouseSearchQuery"
+                      class="search-select-search-input"
+                      placeholder="输入名称搜索…"
+                      @mousedown.prevent
+                    />
+                  </div>
+                  <div class="search-select-options">
+                    <div v-if="warehouseSearchLoading" class="search-select-empty">
+                      <span class="spinner-border spinner-border-sm me-1"></span>搜索中…
+                    </div>
+                    <template v-else>
+                      <div
+                        v-for="w in warehouseSearchResults"
+                        :key="w.id"
+                        class="search-select-item"
+                        :class="{ active: w.name === marginForm.warehouse_name }"
+                        @mousedown.prevent="selectWarehouse(w)"
+                      >
+                        {{ w.name }}
+                      </div>
+                      <div v-if="warehouseSearchQuery && !warehouseSearchResults.length" class="search-select-empty">无匹配库房</div>
+                      <div v-if="!warehouseSearchQuery" class="search-select-empty">请输入关键词搜索</div>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -643,7 +708,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import * as XLSX from 'xlsx'
 import { hasNavPermission } from '@/composables/useMePermissions'
 import {
@@ -656,11 +721,13 @@ import {
 } from '@/api/cityBenchmarkApi'
 import {
   fetchSmelterPrice,
+  createSmelterPrice,
   updateSmelterPrice,
   fetchSmelterPriceHistory,
   type SmelterPriceRow,
   type SmelterPriceHistoryRow,
 } from '@/api/smelterPriceApi'
+import { fetchTlSmelters, searchTlWarehouses } from '@/api/tlApi'
 import {
   fetchBenchmarkAnalysis,
   type BenchmarkAnalysisRow,
@@ -831,6 +898,11 @@ const showSmelterForm = ref(false)
 const smelterFormLoading = ref(false)
 const smelterFormError = ref('')
 const smelterForm = ref({ price: 0, date: '' })
+const showSmelterAddForm = ref(false)
+const smelterAddLoading = ref(false)
+const smelterAddError = ref('')
+const smelterAddForm = ref({ smelter_id: 0, price: 0, date: '' })
+const smelterOptions = ref<Array<{ id: number; name: string }>>([])
 
 const showHistory = ref(false)
 const historyData = ref<SmelterPriceHistoryRow[]>([])
@@ -858,14 +930,46 @@ function openSmelterEdit() {
   showSmelterForm.value = true
 }
 
+async function openSmelterAdd() {
+  smelterAddForm.value = { smelter_id: 0, price: 0, date: new Date().toISOString().slice(0, 10) }
+  smelterAddError.value = ''
+  showSmelterAddForm.value = true
+  try {
+    const rows = await fetchTlSmelters()
+    smelterOptions.value = rows.map((r) => ({
+      id: Number(r['冶炼厂id'] ?? r.id ?? 0),
+      name: String(r['冶炼厂'] ?? r.name ?? ''),
+    })).filter((s) => s.id > 0 && s.name)
+  } catch {
+    smelterOptions.value = []
+  }
+}
+
+async function submitSmelterAdd() {
+  if (!smelterAddForm.value.smelter_id) { smelterAddError.value = '请选择冶炼厂'; return }
+  if (!smelterAddForm.value.price && smelterAddForm.value.price !== 0) { smelterAddError.value = '请输入标定价格'; return }
+  smelterAddLoading.value = true
+  smelterAddError.value = ''
+  try {
+    await createSmelterPrice(smelterAddForm.value.smelter_id, smelterAddForm.value.price, smelterAddForm.value.date)
+    showSmelterAddForm.value = false
+    await loadSmelterPrice()
+  } catch (e) {
+    smelterAddError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    smelterAddLoading.value = false
+  }
+}
+
 async function submitSmelterForm() {
   if (!smelterForm.value.price && smelterForm.value.price !== 0) { smelterFormError.value = '请输入标定价格'; return }
   if (!smelterForm.value.date) { smelterFormError.value = '请选择日期'; return }
   smelterFormLoading.value = true
   smelterFormError.value = ''
   try {
-    smelterData.value = await updateSmelterPrice(smelterForm.value.price, smelterForm.value.date)
+    await updateSmelterPrice(smelterData.value!.id, smelterForm.value.price, smelterForm.value.date)
     showSmelterForm.value = false
+    await loadSmelterPrice()
   } catch (e) {
     smelterFormError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -947,8 +1051,8 @@ const showMarginForm = ref(false)
 const marginEditing = ref<WarehouseMarginRow | null>(null)
 const marginFormLoading = ref(false)
 const marginFormError = ref('')
-const marginForm = ref<WarehouseMarginForm>({
-  province: '', city: '', warehouse_name: '', benchmark_city: '', benchmark_diff: 0, margin: 0,
+const marginForm = ref<WarehouseMarginForm & { warehouse_id?: number }>({
+  province: '', city: '', warehouse_name: '', benchmark_city: '', benchmark_diff: 0, margin: 0, warehouse_id: undefined,
 })
 
 const marginFileInput = ref<HTMLInputElement | null>(null)
@@ -963,6 +1067,7 @@ function handleMarginFormClickOutside(e: MouseEvent) {
   const target = e.target as Node
   if (warehouseSelectRef.value && !warehouseSelectRef.value.contains(target)) {
     showWarehouseDropdown.value = false
+    warehouseSearchQuery.value = ''
   }
   if (benchmarkCitySelectRef.value && !benchmarkCitySelectRef.value.contains(target)) {
     showBenchmarkCityDropdown.value = false
@@ -973,6 +1078,7 @@ watch(showMarginForm, (v) => {
   if (v) {
     showWarehouseDropdown.value = false
     showBenchmarkCityDropdown.value = false
+    warehouseSearchQuery.value = ''
     setTimeout(() => document.addEventListener('click', handleMarginFormClickOutside), 0)
   } else {
     document.removeEventListener('click', handleMarginFormClickOutside)
@@ -980,16 +1086,49 @@ watch(showMarginForm, (v) => {
 })
 
 const benchmarkCityOptions = ref<string[]>([])
-const warehouseNameOptions = ref<string[]>([])
+const warehouseSearchResults = ref<Array<{ id: number; name: string }>>([])
+const warehouseSearchLoading = ref(false)
+const warehouseDetailMap = ref<Map<string, { id: number; province: string; city: string }>>(new Map())
 const showWarehouseDropdown = ref(false)
 const showBenchmarkCityDropdown = ref(false)
+const warehouseSearchQuery = ref('')
+const warehouseSearchInputRef = ref<HTMLInputElement | null>(null)
+let warehouseSearchTimer: ReturnType<typeof setTimeout> | null = null
 const warehouseSelectRef = ref<HTMLElement | null>(null)
 const benchmarkCitySelectRef = ref<HTMLElement | null>(null)
 
-const filteredWarehouseNames = computed(() => {
-  const q = marginForm.value.warehouse_name.toLowerCase()
-  if (!q) return warehouseNameOptions.value.slice(0, 50)
-  return warehouseNameOptions.value.filter((w) => w.toLowerCase().includes(q)).slice(0, 50)
+async function doWarehouseSearch(query: string) {
+  if (!query) { warehouseSearchResults.value = []; return }
+  warehouseSearchLoading.value = true
+  try {
+    const rows = await searchTlWarehouses(query)
+    const results: Array<{ id: number; name: string }> = []
+    const map = new Map<string, { id: number; province: string; city: string }>()
+    for (const r of rows) {
+      const name = String(r['仓库名'] ?? r['仓库名称'] ?? r['name'] ?? '').trim()
+      const id = Number(r['仓库id'] ?? r['库房id'] ?? r.id ?? 0)
+      if (!name) continue
+      results.push({ id, name })
+      if (id > 0) {
+        map.set(name, {
+          id,
+          province: String(r['省'] ?? r['省份'] ?? '').trim(),
+          city: String(r['市'] ?? r['城市'] ?? '').trim(),
+        })
+      }
+    }
+    warehouseSearchResults.value = results
+    warehouseDetailMap.value = map
+  } catch {
+    warehouseSearchResults.value = []
+  } finally {
+    warehouseSearchLoading.value = false
+  }
+}
+
+watch(warehouseSearchQuery, (val) => {
+  if (warehouseSearchTimer) clearTimeout(warehouseSearchTimer)
+  warehouseSearchTimer = setTimeout(() => doWarehouseSearch(val), 300)
 })
 
 const filteredBenchmarkCities = computed(() => {
@@ -1011,16 +1150,24 @@ async function loadBenchmarkCityOptions() {
   }
 }
 
-async function loadWarehouseNameOptions() {
-  try {
-    const res = await fetchWarehouseMargins({ page: 1, page_size: 500 })
-    const seen = new Set<string>()
-    for (const item of res.items) {
-      if (item.warehouse_name) seen.add(item.warehouse_name)
-    }
-    warehouseNameOptions.value = [...seen].sort((a, b) => a.localeCompare(b, 'zh-CN'))
-  } catch {
-    warehouseNameOptions.value = []
+function toggleWarehouseDropdown() {
+  showWarehouseDropdown.value = !showWarehouseDropdown.value
+  if (showWarehouseDropdown.value) {
+    warehouseSearchQuery.value = ''
+    nextTick(() => warehouseSearchInputRef.value?.focus())
+  }
+}
+
+function selectWarehouse(item: { id: number; name: string }) {
+  marginForm.value.warehouse_name = item.name
+  marginForm.value.warehouse_id = item.id
+  showWarehouseDropdown.value = false
+  warehouseSearchQuery.value = ''
+  warehouseSearchResults.value = []
+  const detail = warehouseDetailMap.value.get(item.name)
+  if (detail) {
+    if (detail.province) marginForm.value.province = detail.province
+    if (detail.city) marginForm.value.city = detail.city
   }
 }
 
@@ -1051,11 +1198,10 @@ function changeMarginPage(p: number) {
 
 function openMarginAdd() {
   marginEditing.value = null
-  marginForm.value = { province: '', city: '', warehouse_name: '', benchmark_city: '', benchmark_diff: 0, margin: 0 }
+  marginForm.value = { province: '', city: '', warehouse_name: '', benchmark_city: '', benchmark_diff: 0, margin: 0, warehouse_id: undefined }
   marginFormError.value = ''
   showMarginForm.value = true
   loadBenchmarkCityOptions()
-  loadWarehouseNameOptions()
 }
 
 function openMarginEdit(row: WarehouseMarginRow) {
@@ -1067,7 +1213,6 @@ function openMarginEdit(row: WarehouseMarginRow) {
   marginFormError.value = ''
   showMarginForm.value = true
   loadBenchmarkCityOptions()
-  loadWarehouseNameOptions()
 }
 
 async function submitMarginForm() {
@@ -1082,7 +1227,8 @@ async function submitMarginForm() {
     if (marginEditing.value) {
       await updateWarehouseMargin(marginEditing.value.id, f)
     } else {
-      await createWarehouseMargin(f)
+      if (!f.warehouse_id) { marginFormError.value = '请从列表中选择库房'; marginFormLoading.value = false; return }
+      await createWarehouseMargin({ ...f, warehouse_id: f.warehouse_id })
     }
     showMarginForm.value = false
     await loadMargins()
@@ -1396,19 +1542,73 @@ async function confirmImport() {
   position: relative;
 }
 
+.search-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  padding-right: 30px;
+}
+
+.search-select-trigger.is-disabled {
+  cursor: not-allowed;
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.search-select-arrow {
+  position: absolute;
+  right: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+  transition: transform 0.2s;
+}
+
+.search-select-arrow.open {
+  transform: rotate(180deg);
+}
+
 .search-select-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
   z-index: 10;
-  max-height: 200px;
-  overflow-y: auto;
   background: #fff;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   margin-top: 2px;
+  overflow: hidden;
+}
+
+.search-select-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e8eef7;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.search-select-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  background: transparent;
+  color: #1e293b;
+}
+
+.search-select-search-input::placeholder {
+  color: #94a3b8;
+}
+
+.search-select-options {
+  max-height: 180px;
+  overflow-y: auto;
 }
 
 .search-select-item {
@@ -1421,6 +1621,19 @@ async function confirmImport() {
 .search-select-item:hover {
   background: #e8f0fe;
   color: #196cc0;
+}
+
+.search-select-item.active {
+  background: #eff6ff;
+  color: #196cc0;
+  font-weight: 600;
+}
+
+.search-select-empty {
+  padding: 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
 .table-toolbar {

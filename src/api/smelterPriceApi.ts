@@ -1,6 +1,5 @@
 import { fetchJson } from './userApi'
 import { getToken } from './authApi'
-import { getApiBase } from './config'
 
 export interface SmelterPriceRow {
   id: number
@@ -16,21 +15,13 @@ export interface SmelterPriceHistoryRow {
   change_time: string
 }
 
-interface ApiResp<T> {
-  code?: number
-  message?: string
-  data?: T
-}
-
 function authHeaders(): HeadersInit {
   const token = getToken()
   if (!token) return {}
   return { Authorization: `Bearer ${token}` }
 }
 
-function baseUrl(): string {
-  return `${getApiBase()}/smelter-price`
-}
+const BASE = '/tl/smelter_calibration_prices'
 
 function readMsg(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
@@ -40,25 +31,61 @@ function readMsg(data: unknown): string {
   return ''
 }
 
+function pickSmelterRow(r: Record<string, unknown>): SmelterPriceRow {
+  return {
+    id: Number(r.config_id ?? r.id ?? 0),
+    smelter: String(r['冶炼厂'] ?? ''),
+    price: Number(r['标定价格'] ?? 0),
+    date: String(r['定价日期'] ?? ''),
+  }
+}
+
+function pickHistoryRow(r: Record<string, unknown>): SmelterPriceHistoryRow {
+  return {
+    id: Number(r.id ?? 0),
+    price: Number(r['标定价格'] ?? 0),
+    operator: String(r['操作人'] ?? r.created_by ?? '-'),
+    change_time: String(r['上传时间'] ?? r['定价日期'] ?? ''),
+  }
+}
+
+function unwrapList(data: unknown): Record<string, unknown>[] {
+  if (data == null) return []
+  if (typeof data !== 'object') return []
+  const o = data as Record<string, unknown>
+  const inner = (o.data ?? o) as Record<string, unknown>
+  const arr = inner.list
+  if (Array.isArray(arr)) return arr.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+  return []
+}
+
 export async function fetchSmelterPrice(): Promise<SmelterPriceRow | null> {
-  const { res, data } = await fetchJson(`${baseUrl()}/current`, {
+  const q = new URLSearchParams({ page: '1', page_size: '1', only_latest: 'true' })
+  const { res, data } = await fetchJson(`${BASE}?${q.toString()}`, {
     method: 'GET',
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(readMsg(data) || `获取冶炼厂标定价格失败（HTTP ${res.status}）`)
-  const payload = (data || {}) as ApiResp<SmelterPriceRow>
-  return payload.data ?? (data as SmelterPriceRow) ?? null
+  const rows = unwrapList(data)
+  return rows.length > 0 ? pickSmelterRow(rows[0]) : null
 }
 
-export async function updateSmelterPrice(price: number, date: string): Promise<SmelterPriceRow> {
-  const { res, data } = await fetchJson(`${baseUrl()}/update`, {
+export async function createSmelterPrice(smelterId: number, price: number, date: string): Promise<void> {
+  const { res, data } = await fetchJson(BASE, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ price, date }),
+    body: JSON.stringify({ '冶炼厂id': smelterId, '标定价格': price, '定价日期': date || null }),
+  })
+  if (!res.ok) throw new Error(readMsg(data) || `新增冶炼厂标定价格失败（HTTP ${res.status}）`)
+}
+
+export async function updateSmelterPrice(priceId: number, price: number, date: string): Promise<void> {
+  const { res, data } = await fetchJson(`${BASE}/${priceId}`, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ calibrated_price: price, price_date: date || null }),
   })
   if (!res.ok) throw new Error(readMsg(data) || `修改冶炼厂标定价格失败（HTTP ${res.status}）`)
-  const payload = (data || {}) as ApiResp<SmelterPriceRow>
-  return payload.data ?? (data as SmelterPriceRow)
 }
 
 export async function fetchSmelterPriceHistory(params?: {
@@ -69,21 +96,17 @@ export async function fetchSmelterPriceHistory(params?: {
   q.set('page', String(params?.page ?? 1))
   q.set('page_size', String(params?.page_size ?? 20))
 
-  const { res, data } = await fetchJson(`${baseUrl()}/history?${q.toString()}`, {
+  const { res, data } = await fetchJson(`${BASE}?${q.toString()}`, {
     method: 'GET',
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(readMsg(data) || `获取标定价格历史记录失败（HTTP ${res.status}）`)
 
-  const payload = (data || {}) as ApiResp<{ items?: SmelterPriceHistoryRow[]; total?: number }>
+  const rows = unwrapList(data)
+  const payload = (data || {}) as Record<string, unknown>
   const inner = (payload.data ?? payload) as Record<string, unknown>
-  const list =
-    (Array.isArray(inner.items) ? inner.items : null) ??
-    (Array.isArray(inner.list) ? inner.list : null) ??
-    (Array.isArray(inner.records) ? inner.records : null) ??
-    []
   return {
-    items: list as SmelterPriceHistoryRow[],
-    total: typeof inner.total === 'number' ? inner.total : list.length,
+    items: rows.map(pickHistoryRow),
+    total: typeof inner.total === 'number' ? inner.total : rows.length,
   }
 }
