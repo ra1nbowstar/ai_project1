@@ -59,7 +59,7 @@ export async function fetchBenchmarkAnalysis(params?: {
   page_size?: number
 }): Promise<{ items: BenchmarkAnalysisRow[]; total: number }> {
   const q = new URLSearchParams()
-  if (params?.province) q.set('库房省份', params.province)
+  if (params?.province) q.set('province', params.province)
   if (params?.county) q.set('库房区', params.county)
   q.set('page', String(params?.page ?? 1))
   q.set('page_size', String(params?.page_size ?? 20))
