@@ -1918,7 +1918,7 @@ watch(
 .table-wrap {
   overflow-x: auto;
 }
-}
+
 
 .data-table {
   width: 100%;

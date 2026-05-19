@@ -419,14 +419,19 @@
         </div>
       </div>
       <div
-        v-if="comparisonModalVisible"
+        v-if="comparisonModalVisible || warehouseDistanceMonitorOn"
         class="emap-cmp-panel"
-        :class="{ 'emap-cmp-panel--compact': comparisonSectionCollapsed && forecastSectionCollapsed }"
+        :class="{
+          'emap-cmp-panel--compact':
+            comparisonSectionCollapsed && forecastSectionCollapsed && !warehouseDistanceMonitorOn,
+          'emap-cmp-panel--distance': warehouseDistanceMonitorOn,
+        }"
       >
         <div class="emap-cmp-panel-head">
           <h4 class="emap-cmp-panel-title">{{ comparisonModalTitle }}</h4>
           <div class="emap-cmp-panel-head-actions">
             <button
+              v-if="!warehouseDistanceMonitorOn"
               type="button"
               class="emap-cmp-panel-toggle"
               :title="comparisonSectionCollapsed ? '展开比价' : '收起比价'"
@@ -435,6 +440,7 @@
               {{ comparisonSectionCollapsed ? '展开比价' : '收起比价' }}
             </button>
             <button
+              v-if="!warehouseDistanceMonitorOn"
               type="button"
               class="emap-cmp-panel-toggle"
               :title="forecastSectionCollapsed ? '展开预测' : '收起预测'"
@@ -445,7 +451,50 @@
             <button type="button" class="emap-cmp-panel-close" @click="closeComparisonModal">&times;</button>
           </div>
         </div>
-        <div v-if="!comparisonSectionCollapsed" class="emap-cmp-summary">
+        <div v-if="warehouseDistanceMonitorOn" class="emap-wh-dist-section">
+          <p v-if="warehouseDistanceLoading" class="emap-wh-dist-loading text-muted mb-0">正在加载绑定与距离…</p>
+          <div v-else class="emap-cmp-table-wrap emap-wh-dist-table-wrap">
+            <table class="table table-sm table-striped align-middle mb-0 emap-cmp-table emap-wh-dist-table">
+              <thead>
+                <tr>
+                  <th>对标库房</th>
+                  <th class="emap-wh-dist-col-km">库房距离</th>
+                  <th>阶梯价差</th>
+                  <th>实时价差</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="!warehouseDistanceTableRows.length">
+                  <td colspan="4" class="text-center text-muted py-3">暂无绑定库房</td>
+                </tr>
+                <tr
+                  v-for="r in warehouseDistanceTableRows"
+                  :key="`wh-dist-${r.toId}`"
+                  :class="{ 'emap-wh-dist-row--focus': warehouseDistanceFocusToId === r.toId }"
+                >
+                  <td class="emap-wh-dist-col-name">
+                    <div class="emap-wh-dist-name-cell">
+                      <button
+                        type="button"
+                        class="emap-wh-dist-locate"
+                        title="定位到地图查看距离卡片"
+                        :aria-label="`定位到${r.toName}`"
+                        @click.stop="focusWarehouseDistanceBindTarget(r.toId)"
+                      >
+                        <i class="bi bi-geo-alt" aria-hidden="true"></i>
+                      </button>
+                      <span class="emap-wh-dist-name-text">{{ r.toName }}</span>
+                    </div>
+                  </td>
+                  <td class="emap-wh-dist-col-km">{{ r.distanceText }}</td>
+                  <td>{{ r.tierPriceDiff }}</td>
+                  <td>{{ r.realTimeDiff }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div v-if="!comparisonSectionCollapsed && !warehouseDistanceMonitorOn" class="emap-cmp-summary">
           <div class="emap-cmp-summary-card">
             <div class="emap-cmp-summary-label">最优方案</div>
             <div class="emap-cmp-summary-value">{{ comparisonSummary.bestSmelter || '-' }}</div>
@@ -459,7 +508,7 @@
             <div class="emap-cmp-summary-value">¥ {{ formatNum(comparisonSummary.marginToSecond) }}</div>
           </div>
         </div>
-        <div v-if="!comparisonSectionCollapsed" class="emap-cmp-table-wrap">
+        <div v-if="!comparisonSectionCollapsed && !warehouseDistanceMonitorOn" class="emap-cmp-table-wrap">
           <table class="table table-sm table-striped align-middle mb-0 emap-cmp-table">
             <thead>
               <tr>
@@ -612,7 +661,7 @@
             </tbody>
           </table>
         </div>
-        <div v-if="!forecastSectionCollapsed" class="emap-cmp-forecast">
+        <div v-if="!forecastSectionCollapsed && !warehouseDistanceMonitorOn" class="emap-cmp-forecast">
           <div class="emap-cmp-forecast-head">
             <div class="emap-cmp-forecast-title">送货量预测</div>
             <div class="emap-cmp-forecast-actions">
@@ -827,6 +876,16 @@ type ComparisonRankItem = {
   xunRongBaoSurchargeYuanPerTon?: number | null
   /** 与上一行同厂：本行为「不含循融宝」口径，不显示排名角标「循」 */
   xunRongBaoExcludedPricing?: boolean
+}
+
+/** 左侧「库房距离监测」表格行 */
+type WarehouseDistanceTableRow = {
+  toId: number
+  toName: string
+  distanceText: string
+  distanceKm: number | null
+  tierPriceDiff: string
+  realTimeDiff: string
 }
 
 /** 与「送货量预测」折线图弹窗下方展示一致 */
@@ -1046,6 +1105,9 @@ const compareLoading = ref(false)
 /** 库房→绑定库房距离连线模式（与比价流向互斥） */
 const warehouseDistanceMonitorOn = ref(false)
 const warehouseDistanceLoading = ref(false)
+const warehouseDistanceTableRows = ref<WarehouseDistanceTableRow[]>([])
+/** 左侧距离表「定位」高亮行（对标库房 id） */
+const warehouseDistanceFocusToId = ref<number | null>(null)
 const forecastLoading = ref(false)
 const compareError = ref('')
 const forecastError = ref('')
@@ -2074,8 +2136,8 @@ function refreshAllMarkerVisualState() {
 
 watch(selectedWarehouse, () => {
   if (warehouseDistanceMonitorOn.value) {
-    warehouseDistanceMonitorOn.value = false
-    clearMapComparisonGraphicsOnly()
+    exitWarehouseDistanceMonitorMode(false)
+    comparisonModalVisible.value = false
   }
   refreshAllMarkerVisualState()
 })
@@ -2977,6 +3039,7 @@ function clearMapComparisonGraphicsOnly() {
 
 function clearComparisonOverlays() {
   warehouseDistanceMonitorOn.value = false
+  warehouseDistanceTableRows.value = []
   clearMapComparisonGraphicsOnly()
   comparisonRanks.value = []
   lastComparisonSortKey.value = ''
@@ -3734,34 +3797,79 @@ function linkOutboundTargetId(row: Record<string, unknown>): number | null {
   return null
 }
 
-/** 出库绑定行上「运费」：可能在边对象或嵌套对标库房上 */
-function pickFreightFromWarehouseLinkRow(row: Record<string, unknown>): unknown {
-  const top = row['运费'] ?? row['freight'] ?? row['shipping_fee']
-  if (top != null && top !== '') return top
+function linkOutboundTargetName(row: Record<string, unknown>, toId: number): string {
   const nestedKeys = ['对标库房', 'to_warehouse', 'target_warehouse', '目标库房', '目标仓库']
-  for (const k of nestedKeys) {
-    const v = row[k]
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      const nested = v as Record<string, unknown>
-      const f = nested['运费'] ?? nested['freight'] ?? nested['shipping_fee']
-      if (f != null && f !== '') return f
+  let toName = pickStr(row, [
+    'to_warehouse_name',
+    '目标库房名',
+    '对标库房名',
+    'target_warehouse_name',
+  ])
+  if (!toName) {
+    for (const k of nestedKeys) {
+      const v = row[k]
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        toName = pickStr(v as Record<string, unknown>, ['仓库名', 'warehouse_name', 'name', '库房名'])
+        if (toName) break
+      }
     }
   }
-  return null
+  const tgt = findWarehousePointByNumericId(toId)
+  if (tgt?.title) return tgt.title
+  return toName || `库房 #${toId}`
 }
 
-function formatFreightDisplay(v: unknown): string {
-  if (v == null || v === '') return '—'
-  if (typeof v === 'number' && Number.isFinite(v)) {
-    return v.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
+async function buildWarehouseDistanceTableRows(
+  warehouse: MapPoint,
+  whId: number,
+  links: Record<string, unknown>[],
+  tierByTargetId: Map<number, string>,
+  spreadByTargetId: Map<number, string>,
+): Promise<WarehouseDistanceTableRow[]> {
+  const entries: { tid: number; linkRow: Record<string, unknown> }[] = []
+  for (const row of links) {
+    const tid = linkOutboundTargetId(row)
+    if (tid != null && tid > 0) entries.push({ tid, linkRow: row })
   }
-  const s = String(v).trim()
-  if (!s) return '—'
-  const n = Number(s)
-  if (Number.isFinite(n) && s === String(n)) {
-    return n.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
-  }
-  return s
+  const rows = await Promise.all(
+    entries.map(async ({ tid, linkRow }) => {
+      const tgt = findWarehousePointByNumericId(tid)
+      let distanceText = '—'
+      let distanceKm: number | null = null
+      if (tgt) {
+        try {
+          const d = await fetchTlCalculateDistance(warehouse.lng, warehouse.lat, tgt.lng, tgt.lat, {
+            fromWarehouseId: whId,
+            toWarehouseId: tid,
+          })
+          distanceKm = d.distanceKm
+          distanceText = `${d.distanceKm.toFixed(2)} km`
+        } catch {
+          const m = greatCircleDistanceMeters(warehouse.lat, warehouse.lng, tgt.lat, tgt.lng)
+          distanceKm = m / 1000
+          distanceText = `${distanceKm.toFixed(2)} km`
+        }
+      }
+      return {
+        toId: tid,
+        toName: linkOutboundTargetName(linkRow, tid),
+        distanceText,
+        distanceKm,
+        tierPriceDiff: tierByTargetId.get(tid) ?? formatWarehouseLinkTierDisplay(linkRow),
+        realTimeDiff: spreadByTargetId.get(tid) ?? '—',
+      }
+    }),
+  )
+  return rows.sort((a, b) => {
+    if (a.distanceKm == null && b.distanceKm == null) {
+      return a.toName.localeCompare(b.toName, 'zh-CN')
+    }
+    if (a.distanceKm == null) return 1
+    if (b.distanceKm == null) return -1
+    const d = a.distanceKm - b.distanceKm
+    if (d !== 0) return d
+    return a.toName.localeCompare(b.toName, 'zh-CN')
+  })
 }
 
 /** 出库绑定行「阶梯价差」：与库房距离配置页 parseTierFields 行为一致（纯数字 / JSON 字符串等） */
@@ -3799,8 +3907,7 @@ function formatWarehouseLinkTierDisplay(row: Record<string, unknown>): string {
 function warehouseBindTargetPlainSummary(
   tgt: MapPoint,
   tierDisplay: string,
-  freightDisplay: string,
-  realtimeSpread?: string,
+  realtimeSpreadDisplay: string,
 ): string {
   const row = tgt.raw
   const lines: string[] = [tgt.title]
@@ -3811,9 +3918,20 @@ function warehouseBindTargetPlainSummary(
   const addr = addressText(row).trim()
   if (addr) lines.push(`地址：${addr}`)
   lines.push(`阶梯价差：${tierDisplay}`)
-  if (realtimeSpread != null) lines.push(`实时价差：${realtimeSpread}`)
-  lines.push(`运费：${freightDisplay}`)
+  lines.push(`实时价差：${realtimeSpreadDisplay}`)
   return lines.join('\n')
+}
+
+function warehouseBindDistRow(label: string, value: string): string {
+  return `<div class="emap-wh-bind-dist-row"><span class="emap-wh-bind-dist-k">${escapeHtml(
+    label,
+  )}</span><span class="emap-wh-bind-dist-v">${escapeHtml(value)}</span></div>`
+}
+
+function warehouseBindDistMetric(label: string, value: string): string {
+  return `<div class="emap-wh-bind-dist-metric"><span class="emap-wh-bind-dist-metric-k">${escapeHtml(
+    label,
+  )}</span><span class="emap-wh-bind-dist-metric-v">${escapeHtml(value)}</span></div>`
 }
 
 /** 距离监测常驻 tip 内容（与比价冶炼厂 tip 相同：锚在目标点 + Leaflet 箭头指向该点） */
@@ -3821,33 +3939,30 @@ function warehouseBindMidpointLabelHtml(
   kmStr: string,
   tgt: MapPoint,
   tierDisplay: string,
-  freightDisplay: string,
-  realtimeSpread?: string,
+  realtimeSpreadDisplay: string,
 ): string {
   const row = tgt.raw
-  const metaBits: string[] = []
-  const typeName = pickStr(row, ['类型', 'type', 'warehouse_type_name', '类型名']).trim()
-  if (typeName) metaBits.push(`类型：${escapeHtml(typeName)}`)
-  const pv = provinceFromRow(row).trim()
-  if (pv) metaBits.push(`省份：${escapeHtml(pv)}`)
+  const typeName = pickStr(row, ['类型', 'type', 'warehouse_type_name', '类型名']).trim() || '—'
+  const pv = provinceFromRow(row).trim() || '—'
   const addr = addressText(row).trim()
-  if (addr) {
-    const short = addr.length > 56 ? `${addr.slice(0, 55)}…` : addr
-    metaBits.push(`地址：${escapeHtml(short)}`)
-  }
-  metaBits.push(`阶梯价差：${escapeHtml(tierDisplay)}`)
-  if (realtimeSpread != null) metaBits.push(`实时价差：${escapeHtml(realtimeSpread)}`)
-  metaBits.push(`运费：${escapeHtml(freightDisplay)}`)
-  const meta =
-    metaBits.length > 0
-      ? `<div class="emap-wh-bind-dist-meta">${metaBits.join('<br/>')}</div>`
-      : ''
+  const addrShort = addr ? (addr.length > 48 ? `${addr.slice(0, 47)}…` : addr) : '—'
+  const dual =
+    `<div class="emap-wh-bind-dist-dual">${warehouseBindDistRow('类型', typeName)}${warehouseBindDistRow(
+      '省份',
+      pv,
+    )}</div>` + warehouseBindDistRow('地址', addrShort)
+  const metrics = `<div class="emap-wh-bind-dist-metrics">${warehouseBindDistMetric(
+    '阶梯价差',
+    tierDisplay,
+  )}${warehouseBindDistMetric('实时价差', realtimeSpreadDisplay)}</div>`
   const titleAttr = escapeHtml(
-    warehouseBindTargetPlainSummary(tgt, tierDisplay, freightDisplay, realtimeSpread).replace(/\n/g, ' — '),
+    warehouseBindTargetPlainSummary(tgt, tierDisplay, realtimeSpreadDisplay).replace(/\n/g, ' — '),
   )
-  return `<div class="emap-wh-bind-dist-tip-inner" title="${titleAttr}"><div class="emap-wh-bind-dist-km">${escapeHtml(
+  return `<div class="emap-wh-bind-dist-tip-inner" title="${titleAttr}"><div class="emap-wh-bind-dist-head"><span class="emap-wh-bind-dist-km">${escapeHtml(
     kmStr,
-  )}</div><div class="emap-wh-bind-dist-target">→ ${escapeHtml(tgt.title)}</div>${meta}</div>`
+  )}</span></div><div class="emap-wh-bind-dist-title">${escapeHtml(
+    tgt.title,
+  )}</div><div class="emap-wh-bind-dist-body">${dual}${metrics}</div></div>`
 }
 
 async function drawWarehouseBindingDistanceLines(warehouse: MapPoint) {
@@ -3859,13 +3974,11 @@ async function drawWarehouseBindingDistanceLines(warehouse: MapPoint) {
   if (whId == null) throw new Error('该库房缺少仓库 id，无法查询绑定')
   const links = await fetchTlWarehouseLinksOutbound(whId)
   const targetIds = new Set<number>()
-  const freightByTargetId = new Map<number, string>()
   const tierByTargetId = new Map<number, string>()
   for (const row of links) {
     const tid = linkOutboundTargetId(row)
     if (tid != null && tid > 0) {
       targetIds.add(tid)
-      freightByTargetId.set(tid, formatFreightDisplay(pickFreightFromWarehouseLinkRow(row)))
       tierByTargetId.set(tid, formatWarehouseLinkTierDisplay(row))
     }
   }
@@ -3883,9 +3996,17 @@ async function drawWarehouseBindingDistanceLines(warehouse: MapPoint) {
       if (toId > 0 && spread != null) spreadByTargetId.set(toId, String(spread))
     }
   } catch { /* 实时价差加载失败不影响连线 */ }
+  warehouseDistanceTableRows.value = await buildWarehouseDistanceTableRows(
+    warehouse,
+    whId,
+    links,
+    tierByTargetId,
+    spreadByTargetId,
+  )
   const rendererOpt = { renderer: distanceRenderer }
   let drawn = 0
-  for (const tid of targetIds) {
+  for (const row of warehouseDistanceTableRows.value) {
+    const tid = row.toId
     const tgt = findWarehousePointByNumericId(tid)
     if (!tgt) continue
     const latlngs: L.LatLngTuple[] = [
@@ -3905,22 +4026,11 @@ async function drawWarehouseBindingDistanceLines(warehouse: MapPoint) {
       ...rendererOpt,
     }).addTo(flowLayer)
 
-    let kmStr = ''
-    try {
-      const d = await fetchTlCalculateDistance(warehouse.lng, warehouse.lat, tgt.lng, tgt.lat, {
-        fromWarehouseId: whId,
-        toWarehouseId: tid,
-      })
-      kmStr = `${d.distanceKm.toFixed(2)} km`
-    } catch {
-      const m = greatCircleDistanceMeters(warehouse.lat, warehouse.lng, tgt.lat, tgt.lng)
-      kmStr = `${(m / 1000).toFixed(2)} km`
-    }
+    const kmStr = row.distanceText
     const dir = emapRankTipDirectionForIdx(drawn)
     const base = emapRankTipBasePixelOffset(dir, comparisonRankTipYOffset())
-    const freightLine = freightByTargetId.get(tid) ?? '—'
-    const tierLine = tierByTargetId.get(tid) ?? '—'
-    const spreadLine = spreadByTargetId.get(tid)
+    const tierLine = row.tierPriceDiff
+    const spreadLine = row.realTimeDiff
     L.tooltip({
       permanent: true,
       direction: dir,
@@ -3930,7 +4040,7 @@ async function drawWarehouseBindingDistanceLines(warehouse: MapPoint) {
       opacity: 1,
     })
       .setLatLng([tgt.lat, tgt.lng])
-      .setContent(warehouseBindMidpointLabelHtml(kmStr, tgt, tierLine, freightLine, spreadLine))
+      .setContent(warehouseBindMidpointLabelHtml(kmStr, tgt, tierLine, spreadLine))
       .addTo(tipLayer)
     drawn++
   }
@@ -3939,18 +4049,56 @@ async function drawWarehouseBindingDistanceLines(warehouse: MapPoint) {
   }
 }
 
+function focusWarehouseDistanceBindTarget(toId: number) {
+  const map = mapRef.value
+  if (!map) {
+    compareError.value = '地图尚未就绪'
+    return
+  }
+  const p = findWarehousePointByNumericId(toId)
+  if (!p) {
+    compareError.value = '该库房在地图上暂无坐标或未加载，无法定位'
+    return
+  }
+  compareError.value = ''
+  warehouseDistanceFocusToId.value = toId
+  const zoom = Math.max(map.getZoom(), 11)
+  setMapViewWithWarehouseLeftPanelBias(map, [p.lat, p.lng], zoom, { animate: true })
+  const relayout = () => scheduleEmapRankTipOverlapFromUi()
+  map.once('moveend', relayout)
+  void nextTick(relayout)
+}
+
+function exitWarehouseDistanceMonitorMode(restoreComparisonOverlay = true) {
+  warehouseDistanceMonitorOn.value = false
+  warehouseDistanceTableRows.value = []
+  warehouseDistanceFocusToId.value = null
+  clearMapComparisonGraphicsOnly()
+  const wh = selectedWarehouse.value
+  if (restoreComparisonOverlay && wh && comparisonRanks.value.length) {
+    const title = wh.title?.trim()
+    comparisonModalTitle.value = title ? `比价结果：${title}` : '比价结果'
+    void renderComparisonOverlay(wh, comparisonRanks.value)
+  }
+}
+
 async function onWarehouseDistanceMonitorClick() {
   const wh = selectedWarehouse.value
   if (!wh || wh.kind !== 'warehouse') return
   if (warehouseDistanceMonitorOn.value) {
-    warehouseDistanceMonitorOn.value = false
-    clearMapComparisonGraphicsOnly()
-    if (comparisonRanks.value.length) {
-      renderComparisonOverlay(wh, comparisonRanks.value)
+    exitWarehouseDistanceMonitorMode(true)
+    if (!comparisonRanks.value.length) {
+      comparisonModalVisible.value = false
     }
     return
   }
+  comparisonSectionCollapsed.value = true
+  forecastSectionCollapsed.value = true
+  comparisonModalVisible.value = true
+  const title = wh.title?.trim()
+  comparisonModalTitle.value = title ? `库房距离监测：${title}` : '库房距离监测'
   clearMapComparisonGraphicsOnly()
+  warehouseDistanceTableRows.value = []
   warehouseDistanceLoading.value = true
   try {
     await drawWarehouseBindingDistanceLines(wh)
@@ -3959,6 +4107,7 @@ async function onWarehouseDistanceMonitorClick() {
   } catch (e) {
     compareError.value = e instanceof Error ? e.message : String(e)
     warehouseDistanceMonitorOn.value = false
+    warehouseDistanceTableRows.value = []
   } finally {
     warehouseDistanceLoading.value = false
   }
@@ -3967,6 +4116,7 @@ async function onWarehouseDistanceMonitorClick() {
 function renderComparisonOverlay(warehouse: MapPoint, ranks: ComparisonRankItem[]) {
   stopEmapRankTipLayoutHandlers()
   warehouseDistanceMonitorOn.value = false
+  warehouseDistanceTableRows.value = []
   cancelFlowOverlayAnimations()
   stopFlowAnimations()
   const flowLayer = flowLayerRef.value
@@ -4208,18 +4358,29 @@ const comparisonSummary = computed(() => {
 })
 
 function openComparisonModal() {
+  if (warehouseDistanceMonitorOn.value) {
+    exitWarehouseDistanceMonitorMode(false)
+  }
   const wh = selectedWarehouse.value?.title?.trim()
   comparisonModalTitle.value = wh ? `比价结果：${wh}` : '比价结果'
   comparisonSectionCollapsed.value = false
   forecastSectionCollapsed.value = false
   comparisonModalVisible.value = true
+  const sel = selectedWarehouse.value
+  if (sel && comparisonRanks.value.length) {
+    void renderComparisonOverlay(sel, comparisonRanks.value)
+  }
 }
 
 function closeComparisonModal() {
+  if (warehouseDistanceMonitorOn.value) {
+    exitWarehouseDistanceMonitorMode(false)
+  }
   comparisonModalVisible.value = false
   comparisonSectionCollapsed.value = false
   forecastSectionCollapsed.value = false
   comparisonCellDetail.value = null
+  warehouseDistanceTableRows.value = []
 }
 
 function drawForecastTrendChart() {
@@ -5576,6 +5737,92 @@ onBeforeUnmount(() => {
   max-width: min(220px, calc(100vw - 200px));
 }
 
+.emap-cmp-panel.emap-cmp-panel--distance {
+  width: min(560px, calc(100% - 24px));
+  max-width: min(560px, calc(100% - 24px));
+}
+
+.emap-wh-dist-section {
+  margin-top: 2px;
+}
+
+.emap-wh-dist-loading {
+  text-align: center;
+  padding: 20px 8px;
+  font-size: 13px;
+}
+
+.emap-wh-dist-table-wrap {
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+
+.emap-wh-dist-name-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.emap-wh-dist-locate {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 6px;
+  background: rgba(8, 26, 52, 0.85);
+  color: #7dd3fc;
+  cursor: pointer;
+  line-height: 1;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.emap-wh-dist-locate:hover {
+  background: rgba(12, 36, 68, 0.95);
+  border-color: #22d3ee;
+  color: #e0f2fe;
+}
+
+.emap-wh-dist-locate .bi {
+  font-size: 14px;
+}
+
+.emap-wh-dist-name-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  line-height: 1.4;
+  padding-top: 3px;
+}
+
+.emap-wh-dist-table tr.emap-wh-dist-row--focus {
+  background: rgba(34, 211, 238, 0.12) !important;
+}
+
+.emap-wh-dist-table tr.emap-wh-dist-row--focus .emap-wh-dist-locate {
+  border-color: #22d3ee;
+  color: #e0f2fe;
+  background: rgba(14, 116, 144, 0.35);
+}
+
+.emap-wh-dist-table .emap-wh-dist-col-name {
+  min-width: 10em;
+  max-width: 16em;
+}
+
+.emap-wh-dist-table .emap-wh-dist-col-km {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .emap-cmp-panel-head {
   display: flex;
   align-items: center;
@@ -6369,25 +6616,25 @@ onBeforeUnmount(() => {
   white-space: normal;
   box-sizing: border-box;
   /* 避免 content 上 min-width:0 等把盒宽压成极窄竖条 */
-  min-width: 232px;
-  max-width: min(288px, 92vw);
+  min-width: 248px;
+  max-width: min(300px, 92vw);
 }
 
 .leaflet-tooltip.emap-wh-bind-dist-tip .leaflet-tooltip-content-wrapper {
   padding: 0;
   background: transparent;
   border-radius: 10px;
-  min-width: 232px;
-  max-width: min(288px, 92vw);
+  min-width: 248px;
+  max-width: min(300px, 92vw);
   box-sizing: border-box;
 }
 
 .leaflet-tooltip.emap-wh-bind-dist-tip .leaflet-tooltip-content {
   margin: 0;
-  padding: 6px 10px 8px;
+  padding: 0;
   box-sizing: border-box;
-  min-width: 232px;
-  max-width: min(288px, 92vw);
+  min-width: 248px;
+  max-width: min(300px, 92vw);
 }
 
 .leaflet-tooltip.emap-wh-bind-dist-tip.leaflet-tooltip-top:before {
@@ -6407,36 +6654,122 @@ onBeforeUnmount(() => {
 }
 
 .emap-wh-bind-dist-tip-inner {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   text-align: left;
-  line-height: 1.35;
+  line-height: 1.4;
   overflow-wrap: break-word;
   word-break: break-word;
-  max-height: 180px;
+  max-height: 200px;
   overflow-y: auto;
+  padding: 0;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-head {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid rgba(216, 180, 254, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px 10px 0 0;
 }
 
 .emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-km {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fdf4ff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(216, 180, 254, 0.18);
+  border: 1px solid rgba(233, 213, 255, 0.35);
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-title {
   font-size: 12px;
   font-weight: 700;
-  margin-bottom: 4px;
-  color: #fdf4ff;
+  line-height: 1.45;
+  color: #faf5ff;
+  padding: 7px 10px 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-target {
-  font-size: 11px;
-  font-weight: 700;
-  margin-bottom: 2px;
-  color: #ede9fe;
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 10px 9px;
 }
 
-.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-meta {
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-row {
+  display: grid;
+  grid-template-columns: minmax(2.8em, max-content) minmax(0, 1fr);
+  column-gap: 5px;
+  align-items: start;
   font-size: 10px;
-  font-weight: 400;
-  opacity: 0.96;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-k {
+  color: #d8b4fe;
+  flex-shrink: 0;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-k::after {
+  content: '：';
+  color: #c4b5fd;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-v {
+  color: #f5f3ff;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
   margin-top: 2px;
-  color: #e9d5ff;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(216, 180, 254, 0.28);
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(216, 180, 254, 0.2);
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-metric-k {
+  font-size: 9px;
+  font-weight: 600;
+  color: #d8b4fe;
+  letter-spacing: 0.04em;
+}
+
+.emap-wh-bind-dist-tip-inner .emap-wh-bind-dist-metric-v {
+  font-size: 12px;
+  font-weight: 800;
+  color: #fdf4ff;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .emap-marker--warehouse .emap-pin-inner {
