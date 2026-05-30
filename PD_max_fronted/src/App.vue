@@ -5,19 +5,25 @@ import {
   fetchDetectionHistory,
   getV3Result,
   getVisualizationBlob,
+  submitRuleChecks,
   submitV1ImageDetectSync,
   submitV3Detect,
   type BboxXYXY,
+  type RuleChecksData,
   type V3ResultItem,
 } from './api/detect'
 import {
-  mapApiRecordToEntry,
+  mergeHistoryEntriesForDisplay,
   type DetectionHistoryEntry,
 } from './detectionHistory'
 import {
   buildExtendedDisplayLines,
   hasExtendedDetectionFields,
 } from './detectionExtendedDisplay'
+import {
+  buildRuleCheckUserView,
+  ruleCheckVerdict,
+} from './ruleCheckDisplay'
 const files = ref<File[]>([])
 const filePreviews = ref<string[]>([])
 const selectedUploadIndex = ref(0)
@@ -45,6 +51,13 @@ type V3ViewPayload = {
   error_msg?: string | null
 }
 const v3Payload = ref<V3ViewPayload | null>(null)
+
+const ruleCheckPayload = ref<RuleChecksData | null>(null)
+const ruleCheckLoading = ref(false)
+const ruleCheckError = ref<string | null>(null)
+
+const ruleCheckVerdictInfo = computed(() => ruleCheckVerdict(ruleCheckPayload.value))
+const ruleCheckUserView = computed(() => buildRuleCheckUserView(ruleCheckPayload.value))
 
 const vizObjectUrl = ref<string | null>(null)
 const vizLoading = ref(false)
@@ -131,11 +144,18 @@ function triggerUploadPick() {
   uploadInputRef.value?.click()
 }
 
+function resetRuleCheck() {
+  ruleCheckPayload.value = null
+  ruleCheckError.value = null
+  ruleCheckLoading.value = false
+}
+
 function resetResults() {
   errorMsg.value = null
   viewingHistoryId.value = null
   historyPreviewUrl.value = null
   v3Payload.value = null
+  resetRuleCheck()
   detectAbort.value?.abort()
   detectAbort.value = null
   vizLoading.value = false
@@ -169,6 +189,26 @@ function isDetectionMockMode(): boolean {
 function detectSubmitOpts(signal: AbortSignal) {
   const t = documentTime.value.trim()
   return { signal, document_time: t || null }
+}
+
+/** 与主鉴伪并行：规则检测失败不阻断 AI 结果展示 */
+function startRuleChecks(file: File, bbox: BboxXYXY | null, signal: AbortSignal) {
+  resetRuleCheck()
+  ruleCheckLoading.value = true
+  void submitRuleChecks(file, bbox, detectSubmitOpts(signal))
+    .then((data) => {
+      if (signal.aborted) return
+      ruleCheckPayload.value = data
+      ruleCheckError.value = null
+    })
+    .catch((e) => {
+      if (e instanceof DOMException && e.name === 'AbortError') return
+      ruleCheckPayload.value = null
+      ruleCheckError.value = e instanceof Error ? e.message : String(e)
+    })
+    .finally(() => {
+      if (!signal.aborted) ruleCheckLoading.value = false
+    })
 }
 
 /** 单张/批量共用：v3 异步提交 → 等待 → 拉取结果（与多张单步逻辑一致） */
@@ -587,7 +627,7 @@ async function goHistoryPage(page: number) {
   historyError.value = null
   try {
     const r = await fetchDetectionHistory(page, HISTORY_PAGE_SIZE)
-    historyEntries.value = r.items.map(mapApiRecordToEntry)
+    historyEntries.value = mergeHistoryEntriesForDisplay(r.items)
     historyTotal.value = r.total
     historyPage.value = page
   } catch (e) {
@@ -615,6 +655,9 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
   pollStatus.value = ''
   viewingHistoryId.value = entry.id
   imageNatural.value = { w: 0, h: 0 }
+  ruleCheckPayload.value = entry.ruleCheck ?? null
+  ruleCheckError.value = null
+  ruleCheckLoading.value = false
   // 后端返回的 imageUrl 应为完整的资源路径（通常以 /ai-detection 开头），
   // 前端不得再统一 prepend 公共 /api/v1 前缀，避免生成错误路径。
   const raw = (entry.imageUrl ?? '').trim()
@@ -683,6 +726,7 @@ async function runV3() {
     const ac = new AbortController()
     detectAbort.value = ac
     pollStatus.value = ''
+    startRuleChecks(one, bbox, ac.signal)
     try {
       pollStatus.value = '正在提交检测…'
       const data = await submitV1ImageDetectSync(one, bbox, detectSubmitOpts(ac.signal))
@@ -737,6 +781,7 @@ async function runV3() {
   const ac = new AbortController()
   detectAbort.value = ac
   pollStatus.value = ''
+  startRuleChecks(one, bbox, ac.signal)
   try {
     pollStatus.value = '预计等待约 1 分钟（按每张约 1 分钟估算）'
     await waitMs(300)
@@ -789,6 +834,7 @@ async function runV3Batch(files: File[]) {
       const f = files[i]!
       const prefix = `批量检测 ${i + 1}/${files.length}`
       try {
+        startRuleChecks(f, null, ac.signal)
         const { taskId, payload } = await runV3AsyncOne(f, null, prefix, ac.signal)
         success += 1
         lastTaskId = taskId
@@ -1249,6 +1295,58 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <div
+            v-if="ruleCheckLoading || ruleCheckError || ruleCheckPayload"
+            class="rule-check-block"
+            aria-labelledby="rule-check-heading"
+          >
+            <h3 id="rule-check-heading" class="rule-check-heading">辅助核查</h3>
+            <p class="rule-check-desc">
+              从「是否被拼接贴图」「画面时间是否与单据一致」等角度做补充检查，结论供参考，不替代上方 AI 检测。
+            </p>
+
+            <p v-if="ruleCheckLoading" class="rule-check-status">辅助核查进行中，请稍候…</p>
+            <p v-else-if="ruleCheckError" class="rule-check-error">{{ ruleCheckError }}</p>
+
+            <template v-else-if="ruleCheckPayload && ruleCheckUserView">
+              <div class="rule-check-summary">
+                <span
+                  class="pill sm"
+                  :class="ruleCheckVerdictInfo.pillClass || undefined"
+                  >{{ ruleCheckVerdictInfo.label }}</span
+                >
+                <p class="rule-check-reason">{{ ruleCheckUserView.summary }}</p>
+              </div>
+
+              <ul class="rule-check-findings">
+                <li
+                  v-for="(item, idx) in ruleCheckUserView.findings"
+                  :key="idx"
+                  class="rule-check-finding"
+                  :class="'rule-check-finding--' + item.status"
+                >
+                  <span class="rule-check-finding-icon" aria-hidden="true">{{
+                    item.status === 'ok' ? '✓' : item.status === 'warn' ? '!' : '×'
+                  }}</span>
+                  <div class="rule-check-finding-body">
+                    <strong class="rule-check-finding-title">{{ item.title }}</strong>
+                    <p class="rule-check-finding-text">{{ item.text }}</p>
+                  </div>
+                </li>
+              </ul>
+
+              <div v-if="ruleCheckUserView.timeFacts.length" class="rule-check-times">
+                <p class="rule-check-times-title">画面中识别到的时间</p>
+                <ul class="rule-check-times-list">
+                  <li v-for="(t, ti) in ruleCheckUserView.timeFacts" :key="ti">
+                    <span class="rule-check-times-label">{{ t.label }}</span>
+                    <span class="rule-check-times-value">{{ t.value }}</span>
+                  </li>
+                </ul>
+              </div>
+            </template>
+          </div>
+
           <div v-if="vizObjectUrl" class="viz-wrap">
             <h3 class="viz-heading">标注示意图</h3>
             <div class="viz-frame">
@@ -1288,7 +1386,7 @@ onUnmounted(() => {
               {{ historyLoading ? '加载中…' : '刷新' }}
             </button>
           </div>
-          <p class="history-api-hint">来自服务端近 7 日记录（分页）</p>
+          <p class="history-api-hint">来自服务端近 7 日记录；含 AI 检测与辅助核查结果</p>
           <p v-if="historyError" class="history-error">{{ historyError }}</p>
           <p
             v-if="!historyLoading && !historyEntries.length && !historyError"
@@ -2426,6 +2524,177 @@ onUnmounted(() => {
   margin-top: 1rem;
   padding-top: 0.85rem;
   border-top: 1px solid var(--border);
+}
+
+.rule-check-block {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--border);
+}
+
+.rule-check-heading {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.rule-check-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.rule-check-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--brand);
+}
+
+.rule-check-error {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #b45309;
+  white-space: pre-wrap;
+}
+
+.rule-check-summary {
+  margin-bottom: 0.75rem;
+}
+
+.rule-check-reason {
+  margin: 0.5rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.rule-check-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.rule-check-finding {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #fafbfc;
+}
+
+.rule-check-finding--ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.rule-check-finding--warn {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.rule-check-finding--bad {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.rule-check-finding-icon {
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.rule-check-finding--ok .rule-check-finding-icon {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.rule-check-finding--warn .rule-check-finding-icon {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.rule-check-finding--bad .rule-check-finding-icon {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.rule-check-finding-body {
+  min-width: 0;
+}
+
+.rule-check-finding-title {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+
+.rule-check-finding-text {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.rule-check-times {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.rule-check-times-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.rule-check-times-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule-check-times-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  padding: 0.28rem 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.rule-check-times-list li:last-child {
+  border-bottom: none;
+}
+
+.rule-check-times-label {
+  color: var(--text-muted);
+  min-width: 7.5rem;
+}
+
+.rule-check-times-value {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .multi-scroll {

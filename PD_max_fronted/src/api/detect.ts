@@ -932,6 +932,12 @@ export interface DetectionHistoryOutcome {
   result?: V3ResultItem | null
   multi_results?: V3ResultItem[]
   error_msg?: string | null
+  /** 规则检测完整结果（mode=rule_checks 或嵌套在 AI outcome 内） */
+  rule_checks?: Record<string, unknown>
+  pixel_overlap?: unknown
+  timestamp?: unknown
+  hard_tamper_flags?: Record<string, boolean>
+  reason?: string
 }
 
 export interface DetectionHistoryApiRecord {
@@ -1021,10 +1027,17 @@ function coerceApiRecord(raw: Record<string, unknown>): DetectionHistoryApiRecor
           : typeof oc.errorMsg === 'string'
             ? oc.errorMsg
             : null,
+      rule_checks: isRecord(oc.rule_checks) ? oc.rule_checks : undefined,
+      pixel_overlap: oc.pixel_overlap,
+      timestamp: oc.timestamp,
+      hard_tamper_flags: isRecord(oc.hard_tamper_flags)
+        ? (oc.hard_tamper_flags as Record<string, boolean>)
+        : undefined,
+      reason: typeof oc.reason === 'string' ? oc.reason : undefined,
     }
   }
   return {
-    id: '',
+    id: String(id),
     created_at: created,
     mode,
     task_id: taskId,
@@ -1103,4 +1116,160 @@ export async function fetchDetectionHistory(
   const json: unknown = await res.json()
   const { items, total } = extractItemsAndTotal(json)
   return { items, total, page: p, pageSize: ps }
+}
+
+/** POST /ai-detection/api/v1/rule-checks — 像素重叠（可选 bbox）+ 时间戳规则聚合 */
+export type RuleChecksPixelOverlap = {
+  pixel_overlap_score?: number
+  overlap_metrics?: {
+    structural_score?: number
+    blend_score?: number
+    double_edge_ratio?: number
+    long_gradient_ratio?: number
+    [key: string]: unknown
+  }
+  bbox?: number[]
+  bbox_xyxy?: number[]
+  alert?: boolean
+  hard_tamper?: boolean
+  reasons?: string[]
+  [key: string]: unknown
+}
+
+export type RuleChecksTimestampDetail = {
+  status_bar_time?: string | null
+  transaction_time?: string | null
+  transaction_datetime?: string | null
+  business_document_time?: string | null
+  business_document_datetime?: string | null
+  exif_datetime_original?: string | null
+  exif_datetime_digitized?: string | null
+  has_exif?: boolean
+  exif_software?: string | null
+  anomalies?: string[]
+  business_mismatch?: boolean
+  [key: string]: unknown
+}
+
+export type RuleChecksTimestamp = {
+  timestamp_check?: RuleChecksTimestampDetail
+  risk?: number
+  reasons?: string[]
+  anomalies?: string[]
+  hard_tamper?: boolean
+  business_mismatch?: boolean
+  [key: string]: unknown
+}
+
+export type RuleChecksData = {
+  pixel_overlap?: RuleChecksPixelOverlap | null
+  timestamp?: RuleChecksTimestamp
+  hard_tamper_flags?: Record<string, boolean>
+  reason?: string
+}
+
+function ruleCheckDataLayer(json: unknown): Record<string, unknown> {
+  if (!isRecord(json)) return {}
+  if (typeof json.status === 'string' && json.status === 'error') {
+    const msg =
+      typeof json.message === 'string' && json.message.trim()
+        ? json.message.trim()
+        : '规则检测失败'
+    throw new Error(msg)
+  }
+  const merged = outcomeLayer(json)
+  if (isRecord(merged.data)) return merged.data
+  return merged
+}
+
+function normalizeRuleChecksJson(json: unknown): RuleChecksData {
+  const o = ruleCheckDataLayer(json)
+  return {
+    pixel_overlap: (o.pixel_overlap as RuleChecksPixelOverlap | null | undefined) ?? null,
+    timestamp: isRecord(o.timestamp) ? (o.timestamp as RuleChecksTimestamp) : undefined,
+    hard_tamper_flags: isRecord(o.hard_tamper_flags)
+      ? (o.hard_tamper_flags as Record<string, boolean>)
+      : undefined,
+    reason: typeof o.reason === 'string' ? o.reason : undefined,
+  }
+}
+
+async function postRuleCheckMultipart(
+  path: string,
+  file: File,
+  fields: Record<string, string | undefined>,
+  opts?: DetectSubmitOpts,
+): Promise<RuleChecksData> {
+  const fd = new FormData()
+  fd.append('file', file)
+  for (const [k, v] of Object.entries(fields)) {
+    if (v != null && v !== '') fd.append(k, v)
+  }
+  appendDocumentTime(fd, opts?.document_time)
+  const res = await fetch(aiDetectionUrl(path), {
+    method: 'POST',
+    body: fd,
+    signal: opts?.signal,
+  })
+  if (!res.ok) {
+    const t = await res.text()
+    throw new Error(httpFailMessage(res.status, t))
+  }
+  const json: unknown = await res.json()
+  return normalizeRuleChecksJson(json)
+}
+
+/** 聚合规则检测：推荐与 v3 并行调用 */
+export async function submitRuleChecks(
+  file: File,
+  bbox?: BboxXYXY | null,
+  opts?: DetectSubmitOpts,
+): Promise<RuleChecksData> {
+  const fields: Record<string, string | undefined> = {}
+  if (bbox != null) fields.bbox = JSON.stringify(bbox)
+  return postRuleCheckMultipart('/api/v1/rule-checks', file, fields, opts)
+}
+
+/** 仅 ROI 像素重叠 */
+export async function submitPixelOverlapCheck(
+  file: File,
+  bbox: BboxXYXY,
+  opts?: DetectSubmitOpts,
+): Promise<RuleChecksPixelOverlap> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('bbox', JSON.stringify(bbox))
+  appendDocumentTime(fd, opts?.document_time)
+  const res = await fetch(aiDetectionUrl('/api/v1/pixel-overlap/check'), {
+    method: 'POST',
+    body: fd,
+    signal: opts?.signal,
+  })
+  if (!res.ok) {
+    const t = await res.text()
+    throw new Error(httpFailMessage(res.status, t))
+  }
+  const json: unknown = await res.json()
+  return ruleCheckDataLayer(json) as RuleChecksPixelOverlap
+}
+
+/** 仅时间戳 / EXIF / 单据时间 */
+export async function submitTimestampCheck(
+  file: File,
+  opts?: DetectSubmitOpts,
+): Promise<RuleChecksTimestamp> {
+  const fd = new FormData()
+  fd.append('file', file)
+  appendDocumentTime(fd, opts?.document_time)
+  const res = await fetch(aiDetectionUrl('/api/v1/timestamp/check'), {
+    method: 'POST',
+    body: fd,
+    signal: opts?.signal,
+  })
+  if (!res.ok) {
+    const t = await res.text()
+    throw new Error(httpFailMessage(res.status, t))
+  }
+  const json: unknown = await res.json()
+  return ruleCheckDataLayer(json) as RuleChecksTimestamp
 }
