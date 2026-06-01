@@ -557,8 +557,6 @@
         </div>
       </div>
     </div>
-      </div>
-    </div>
 
     <!-- 错误提示弹窗 -->
     <div v-if="errorModalVisible" class="modal" @click.self="closeErrorModal">
