@@ -678,7 +678,6 @@ const chartTotalByDate = ref<number[]>([])
 const summaryChartCanvasRef = ref<HTMLCanvasElement | null>(null)
 const summaryHoverIndex = ref(-1)
 const summaryTooltipStyle = ref<Record<string, string>>({})
-const SUMMARY_HIT_RADIUS = 16
 
 interface SummaryChartLayout {
   margin: { t: number; r: number; b: number; l: number }
@@ -908,7 +907,6 @@ const modalChartValues = ref<number[]>([])
 const rowTrendCanvas = ref<HTMLCanvasElement>()
 const trendHoverIndex = ref(-1)
 const trendTooltipStyle = ref<Record<string, string>>({})
-const TREND_HIT_RADIUS = 16
 
 interface TrendChartLayout {
   margin: { t: number; r: number; b: number; l: number }
@@ -1146,14 +1144,13 @@ function summaryCanvasPointer(ev: MouseEvent): { x: number; y: number } {
 function findNearestSummaryPoint(px: number, py: number): number {
   if (!summaryChartLayout) return -1
   const values = chartTotalByDate.value
-  let best = -1
-  let bestDist = SUMMARY_HIT_RADIUS
+  if (values.length === 0) return -1
+  let best = 0
+  let bestDist = Math.abs(px - summaryChartLayout!.toX(0))
   values.forEach((v, i) => {
-    const dx = px - summaryChartLayout!.toX(i)
-    const dy = py - summaryChartLayout!.toY(v)
-    const d = Math.hypot(dx, dy)
-    if (d < bestDist) {
-      bestDist = d
+    const dx = Math.abs(px - summaryChartLayout!.toX(i))
+    if (dx < bestDist) {
+      bestDist = dx
       best = i
     }
   })
@@ -1986,14 +1983,13 @@ function trendCanvasPointer(ev: MouseEvent): { x: number; y: number } {
 function findNearestTrendPoint(px: number, py: number): number {
   if (!trendChartLayout) return -1
   const values = modalChartValues.value
-  let best = -1
-  let bestDist = TREND_HIT_RADIUS
+  if (values.length === 0) return -1
+  let best = 0
+  let bestDist = Math.abs(px - trendChartLayout!.toX(0))
   values.forEach((v, i) => {
-    const dx = px - trendChartLayout!.toX(i)
-    const dy = py - trendChartLayout!.toY(v)
-    const d = Math.hypot(dx, dy)
-    if (d < bestDist) {
-      bestDist = d
+    const dx = Math.abs(px - trendChartLayout!.toX(i))
+    if (dx < bestDist) {
+      bestDist = dx
       best = i
     }
   })

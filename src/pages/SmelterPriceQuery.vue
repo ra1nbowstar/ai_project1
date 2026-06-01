@@ -186,7 +186,6 @@ interface ChartLayout {
 }
 
 let chartLayout: ChartLayout | null = null
-const CHART_HIT_RADIUS = 14
 
 const listAllRows = ref<SmelterPriceRow[]>([])
 const listPage = ref(1)
@@ -239,6 +238,11 @@ function defaultChartDateRange(): { from: string; to: string } {
   from.setDate(from.getDate() - 29)
   const fmt = (d: Date) => d.toISOString().slice(0, 10)
   return { from: fmt(from), to: fmt(to) }
+}
+
+function applyDefaultFilters() {
+  const { from, to } = defaultChartDateRange()
+  filters.value = { dateFrom: from, dateTo: to }
 }
 
 function rowChange(row: SmelterPriceRow, idx: number): number | null {
@@ -344,7 +348,7 @@ async function handleQuery() {
 }
 
 function resetFilters() {
-  filters.value = { dateFrom: '', dateTo: '' }
+  applyDefaultFilters()
   listPage.value = 1
   void loadChart()
   void loadList()
@@ -360,7 +364,7 @@ function buildChartLayout(
   _prices: number[],
   n: number,
 ): ChartLayout & { W: number; H: number; yMin: number; yMax: number; yRange: number } {
-  const margin = { t: 24, r: 20, b: 44, l: 72 }
+  const margin = { t: 24, r: 20, b: 56, l: 72 }
   const W = width - margin.l - margin.r
   const H = height - margin.t - margin.b
   const yMin = 0
@@ -466,13 +470,13 @@ function drawChart(highlightIndex = -1) {
   dates.forEach((d, i) => {
     if (i % labStep !== 0 && i !== n - 1) return
     const label = d.length >= 10 ? d.slice(5) : d
-    ctx.fillText(label, toX(i) - 16, margin.t + H + 28)
+    ctx.fillText(label, toX(i) - 16, margin.t + H + 20)
   })
 
   ctx.fillStyle = '#475569'
   ctx.font = '12px system-ui, sans-serif'
   ctx.fillText('标定价格（元/吨）', margin.l, margin.t - 8)
-  ctx.fillText('定价日期', margin.l + W / 2 - 28, height - 8)
+  ctx.fillText('定价日期', margin.l + W / 2 - 28, height - 6)
 
   if (highlightIndex >= 0) {
     updateChartTooltipPosition(highlightIndex)
@@ -493,14 +497,13 @@ function canvasPointer(ev: MouseEvent): { x: number; y: number } {
 function findNearestChartPoint(px: number, py: number): number {
   if (!chartLayout) return -1
   const series = chartSeries.value
-  let best = -1
-  let bestDist = CHART_HIT_RADIUS
+  if (series.length === 0) return -1
+  let best = 0
+  let bestDist = Math.abs(px - chartLayout!.toX(0))
   series.forEach((row, i) => {
-    const dx = px - chartLayout!.toX(i)
-    const dy = py - chartLayout!.toY(row.price)
-    const d = Math.hypot(dx, dy)
-    if (d < bestDist) {
-      bestDist = d
+    const dx = Math.abs(px - chartLayout!.toX(i))
+    if (dx < bestDist) {
+      bestDist = dx
       best = i
     }
   })
@@ -549,6 +552,7 @@ watch(chartSeries, () => {
 })
 
 onMounted(async () => {
+  applyDefaultFilters()
   await loadSmelterOptions()
   if (selectedSmelterId.value) {
     await reloadAll()
