@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
 import {
+  deleteDetectionHistory,
+  deleteFeedbackEntry,
+  deleteTrainingDatasetEntry,
   deleteV3Task,
   fetchDetectionHistory,
+  fetchFeedbackEntries,
   fetchHealth,
   fetchModels,
+  fetchTrainingDatasetAnnotation,
+  fetchTrainingDatasetEntries,
   getV3Result,
   getVisualizationBlob,
   pollV3UntilComplete,
@@ -14,9 +20,17 @@ import {
   submitV1ImageDetectSync,
   submitV3Detect,
   triggerTraining,
+  updateFeedbackEntry,
+  updateTrainingDatasetEntry,
   type BboxXYXY,
+  type FeedbackEntry,
+  type FeedbackJudgment,
   type HealthStatus,
   type RuleChecksData,
+  type TrainingDatasetEntry,
+  type TrainingDatasetFilter,
+  type TrainingDatasetLabel,
+  type TrainingDatasetSummary,
   type V3ResultItem,
 } from './api/detect'
 import {
@@ -132,12 +146,61 @@ const historyCanNext = computed(
     historyTotalPages.value > 0 && historyPage.value < historyTotalPages.value,
 )
 
+type AppView = 'detect' | 'manage'
+type ManageTab = 'feedback' | 'dataset' | 'history'
+type FeedbackFilter = FeedbackJudgment | 'all'
+
+const appView = ref<AppView>('detect')
+const manageTab = ref<ManageTab>('feedback')
+const feedbackFilter = ref<FeedbackFilter>('all')
+const feedbackEntries = ref<FeedbackEntry[]>([])
+const feedbackLoading = ref(false)
+const feedbackError = ref<string | null>(null)
+const feedbackTotal = ref(0)
+const selectedFeedbackFolder = ref<string | null>(null)
+const feedbackActionBusy = ref<Record<string, boolean>>({})
+const datasetFilter = ref<TrainingDatasetFilter>('all')
+const datasetIncludeEnhanced = ref(true)
+const datasetEntries = ref<TrainingDatasetEntry[]>([])
+const datasetLoading = ref(false)
+const datasetError = ref<string | null>(null)
+const datasetSummary = ref<TrainingDatasetSummary | null>(null)
+const selectedDatasetFilename = ref<string | null>(null)
+const datasetAnnotation = ref<unknown>(null)
+const datasetAnnotationLoading = ref(false)
+const datasetAnnotationError = ref<string | null>(null)
+const datasetActionBusy = ref<Record<string, boolean>>({})
+const managedHistoryRows = ref<DetectionHistoryEntry[]>([])
+const managedHistoryLoading = ref(false)
+const managedHistoryError = ref<string | null>(null)
+const managedHistoryTotal = ref(0)
+const selectedManagedHistoryId = ref<string | null>(null)
+const managedHistoryActionBusy = ref<Record<string, boolean>>({})
+
 const viewingHistoryId = ref<string | null>(null)
 /** 同步检测进行中时用于取消 fetch */
 const detectAbort = ref<AbortController | null>(null)
 
 const activePreviewUrl = computed(
   () => filePreviews.value[selectedUploadIndex.value] || null,
+)
+
+const selectedFeedback = computed(() =>
+  feedbackEntries.value.find((x) => x.folder_name === selectedFeedbackFolder.value) ??
+  feedbackEntries.value[0] ??
+  null,
+)
+
+const selectedManagedHistory = computed(() =>
+  managedHistoryRows.value.find((x) => x.id === selectedManagedHistoryId.value) ??
+  managedHistoryRows.value[0] ??
+  null,
+)
+
+const selectedDatasetEntry = computed(() =>
+  datasetEntries.value.find((x) => x.filename === selectedDatasetFilename.value) ??
+  datasetEntries.value[0] ??
+  null,
 )
 
 function revokeUploadPreviews() {
@@ -322,7 +385,7 @@ async function handleTraining() {
   }
 }
 
-async function handleFeedback(taskId: string, resultIndex: number, judgment: 'correct' | 'wrong' | 'suspicious') {
+async function handleFeedback(taskId: string, resultIndex: number, judgment: FeedbackJudgment) {
   if (isDetectionMockMode()) return
   const key = `${taskId}-${resultIndex}`
   feedbackSubmitting.value[key] = true
@@ -333,6 +396,249 @@ async function handleFeedback(taskId: string, resultIndex: number, judgment: 'co
   } finally {
     feedbackSubmitting.value[key] = false
   }
+}
+
+function judgmentText(judgment: string | undefined): string {
+  if (judgment === 'correct') return '正确'
+  if (judgment === 'wrong') return '错误'
+  if (judgment === 'suspicious') return '疑似'
+  return '—'
+}
+
+function feedbackResultText(entry: FeedbackEntry | null | undefined): string {
+  const r = entry?.engine_result
+  if (r && typeof r === 'object' && 'result' in r) {
+    const label = String((r as { result?: unknown }).result ?? '').trim()
+    return label || '—'
+  }
+  return '—'
+}
+
+function feedbackConfidenceText(entry: FeedbackEntry | null | undefined): string {
+  const r = entry?.engine_result
+  if (r && typeof r === 'object' && 'confidence' in r) {
+    const n = Number((r as { confidence?: unknown }).confidence)
+    if (Number.isFinite(n)) return `${(n * 100).toFixed(1)}%`
+  }
+  return '—'
+}
+
+function feedbackReason(entry: FeedbackEntry | null | undefined): string {
+  const r = entry?.engine_result
+  if (r && typeof r === 'object' && 'reason' in r) {
+    return String((r as { reason?: unknown }).reason ?? '').trim() || '—'
+  }
+  return '—'
+}
+
+function feedbackImageUrl(entry: FeedbackEntry | null | undefined): string {
+  const raw = entry?.image_url?.trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('/')) return raw
+  return '/' + raw
+}
+
+function datasetLabelText(label: number | undefined): string {
+  return label === 0 ? '正常' : label === 1 ? '篡改' : '—'
+}
+
+function datasetPillClass(entry: TrainingDatasetEntry | null | undefined): string {
+  return entry?.label === 0 ? '正常' : '篡改'
+}
+
+function datasetImageUrl(entry: TrainingDatasetEntry | null | undefined): string {
+  const raw = entry?.image_url?.trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('/')) return raw
+  return '/' + raw
+}
+
+function datasetSizeText(bytes: number | undefined): string {
+  const n = Number(bytes ?? 0)
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`
+  return `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+function datasetDimsText(entry: TrainingDatasetEntry | null | undefined): string {
+  if (!entry?.width || !entry?.height) return '—'
+  return `${entry.width} × ${entry.height}`
+}
+
+function datasetAnnotationText(): string {
+  if (datasetAnnotation.value == null) return ''
+  try {
+    return JSON.stringify(datasetAnnotation.value, null, 2)
+  } catch {
+    return String(datasetAnnotation.value)
+  }
+}
+
+async function loadFeedbackEntries() {
+  if (isDetectionMockMode()) return
+  feedbackLoading.value = true
+  feedbackError.value = null
+  try {
+    const data = await fetchFeedbackEntries(feedbackFilter.value)
+    feedbackEntries.value = data.items
+    feedbackTotal.value = data.total
+    if (!feedbackEntries.value.some((x) => x.folder_name === selectedFeedbackFolder.value)) {
+      selectedFeedbackFolder.value = feedbackEntries.value[0]?.folder_name ?? null
+    }
+  } catch (e) {
+    feedbackError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+async function changeFeedbackJudgment(entry: FeedbackEntry, judgment: FeedbackJudgment) {
+  const key = `${entry.folder_name}:${judgment}`
+  feedbackActionBusy.value[key] = true
+  try {
+    await updateFeedbackEntry(entry.folder_name, judgment, entry.user_note)
+    await loadFeedbackEntries()
+  } catch (e) {
+    feedbackError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    feedbackActionBusy.value[key] = false
+  }
+}
+
+async function removeFeedbackEntry(entry: FeedbackEntry) {
+  if (!confirm('确认删除这条反馈标注？')) return
+  const key = `${entry.folder_name}:delete`
+  feedbackActionBusy.value[key] = true
+  try {
+    await deleteFeedbackEntry(entry.folder_name)
+    if (selectedFeedbackFolder.value === entry.folder_name) selectedFeedbackFolder.value = null
+    await loadFeedbackEntries()
+  } catch (e) {
+    feedbackError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    feedbackActionBusy.value[key] = false
+  }
+}
+
+async function loadDatasetEntries() {
+  datasetLoading.value = true
+  datasetError.value = null
+  try {
+    const data = await fetchTrainingDatasetEntries(datasetFilter.value, datasetIncludeEnhanced.value)
+    datasetEntries.value = data.items
+    datasetSummary.value = data.summary
+    if (!datasetEntries.value.some((x) => x.filename === selectedDatasetFilename.value)) {
+      selectedDatasetFilename.value = datasetEntries.value[0]?.filename ?? null
+    }
+    if (selectedDatasetEntry.value) {
+      await loadDatasetAnnotation(selectedDatasetEntry.value)
+    } else {
+      datasetAnnotation.value = null
+      datasetAnnotationError.value = null
+    }
+  } catch (e) {
+    datasetError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    datasetLoading.value = false
+  }
+}
+
+async function loadDatasetAnnotation(entry: TrainingDatasetEntry | null | undefined) {
+  datasetAnnotation.value = null
+  datasetAnnotationError.value = null
+  if (!entry?.has_annotation) return
+  datasetAnnotationLoading.value = true
+  try {
+    datasetAnnotation.value = await fetchTrainingDatasetAnnotation(entry.filename)
+  } catch (e) {
+    datasetAnnotationError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    datasetAnnotationLoading.value = false
+  }
+}
+
+async function selectDatasetEntry(entry: TrainingDatasetEntry) {
+  selectedDatasetFilename.value = entry.filename
+  await loadDatasetAnnotation(entry)
+}
+
+async function changeDatasetLabel(entry: TrainingDatasetEntry, label: TrainingDatasetLabel) {
+  const key = `${entry.filename}:${label}`
+  datasetActionBusy.value[key] = true
+  try {
+    const data = await updateTrainingDatasetEntry(entry.filename, label)
+    if (data.summary) datasetSummary.value = data.summary
+    selectedDatasetFilename.value = data.entry?.filename ?? selectedDatasetFilename.value
+    await loadDatasetEntries()
+  } catch (e) {
+    datasetError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    datasetActionBusy.value[key] = false
+  }
+}
+
+async function removeDatasetEntry(entry: TrainingDatasetEntry) {
+  if (!confirm('确认删除该训练样本及其配套增强图和标注 JSON？')) return
+  const key = `${entry.filename}:delete`
+  datasetActionBusy.value[key] = true
+  try {
+    const data = await deleteTrainingDatasetEntry(entry.filename, true)
+    if (data.summary) datasetSummary.value = data.summary
+    if (selectedDatasetFilename.value === entry.filename) selectedDatasetFilename.value = null
+    await loadDatasetEntries()
+  } catch (e) {
+    datasetError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    datasetActionBusy.value[key] = false
+  }
+}
+
+async function loadManagedHistory() {
+  managedHistoryLoading.value = true
+  managedHistoryError.value = null
+  try {
+    const data = await fetchDetectionHistory(1, 200)
+    managedHistoryRows.value = mergeHistoryEntriesForDisplay(data.items)
+    managedHistoryTotal.value = data.total
+    if (!managedHistoryRows.value.some((x) => x.id === selectedManagedHistoryId.value)) {
+      selectedManagedHistoryId.value = managedHistoryRows.value[0]?.id ?? null
+    }
+  } catch (e) {
+    managedHistoryError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    managedHistoryLoading.value = false
+  }
+}
+
+async function removeManagedHistory(entry: DetectionHistoryEntry) {
+  if (!confirm('确认删除这条历史记录？')) return
+  managedHistoryActionBusy.value[entry.id] = true
+  try {
+    await deleteDetectionHistory(entry.id)
+    if (selectedManagedHistoryId.value === entry.id) selectedManagedHistoryId.value = null
+    await loadManagedHistory()
+    await refreshHistoryList()
+  } catch (e) {
+    managedHistoryError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    managedHistoryActionBusy.value[entry.id] = false
+  }
+}
+
+async function showManagement(tab: ManageTab = manageTab.value) {
+  appView.value = 'manage'
+  manageTab.value = tab
+  if (tab === 'feedback') {
+    await loadFeedbackEntries()
+  } else if (tab === 'dataset') {
+    await loadDatasetEntries()
+  } else {
+    await loadManagedHistory()
+  }
+}
+
+function showDetectWorkspace() {
+  appView.value = 'detect'
 }
 
 async function startRuleChecks(
@@ -1249,6 +1555,26 @@ onUnmounted(() => {
             <h1 class="brand-title">图像真伪检测</h1>
             <p class="brand-sub">检测图像是否存在后期篡改风险</p>
           </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="topbar-tabs" role="tablist" aria-label="页面切换">
+            <button
+              type="button"
+              class="topbar-tab"
+              :class="{ active: appView === 'detect' }"
+              @click="showDetectWorkspace"
+            >
+              检测工作台
+            </button>
+            <button
+              type="button"
+              class="topbar-tab"
+              :class="{ active: appView === 'manage' }"
+              @click="showManagement()"
+            >
+              数据管理
+            </button>
+          </div>
           <div class="topbar-health">
             <span v-if="health" class="health-dot" :class="{ 'health-ok': health.status === 'ok', 'health-mock': health.status === 'mock' }" />
             <span v-if="health" class="health-text">
@@ -1261,7 +1587,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <div class="main">
+    <div v-if="appView === 'detect'" class="main">
       <aside class="sidebar">
         <section class="card side-section">
           <h2 class="section-title">检测方式</h2>
@@ -1863,6 +2189,357 @@ onUnmounted(() => {
       </aside>
     </div>
 
+    <main v-else class="manage-main">
+      <section class="manage-toolbar card">
+        <div>
+          <h2 class="manage-title">数据管理</h2>
+          <p class="manage-subtitle">反馈标注、训练样本和历史记录维护</p>
+        </div>
+        <div class="manage-tabs" role="tablist" aria-label="数据管理分类">
+          <button
+            type="button"
+            class="manage-tab"
+            :class="{ active: manageTab === 'feedback' }"
+            @click="showManagement('feedback')"
+          >
+            反馈标注
+          </button>
+          <button
+            type="button"
+            class="manage-tab"
+            :class="{ active: manageTab === 'dataset' }"
+            @click="showManagement('dataset')"
+          >
+            训练集
+          </button>
+          <button
+            type="button"
+            class="manage-tab"
+            :class="{ active: manageTab === 'history' }"
+            @click="showManagement('history')"
+          >
+            历史记录
+          </button>
+        </div>
+      </section>
+
+      <section v-if="manageTab === 'feedback'" class="manage-grid">
+        <div class="card manage-list-card">
+          <div class="manage-card-head">
+            <h3 class="section-title tight">反馈列表</h3>
+            <button type="button" class="btn-text-refresh" :disabled="feedbackLoading" @click="loadFeedbackEntries">
+              {{ feedbackLoading ? '加载中…' : '刷新' }}
+            </button>
+          </div>
+          <div class="manage-filter-row">
+            <button
+              v-for="f in (['all', 'suspicious', 'wrong', 'correct'] as const)"
+              :key="f"
+              type="button"
+              class="filter-chip"
+              :class="{ active: feedbackFilter === f }"
+              @click="feedbackFilter = f; loadFeedbackEntries()"
+            >
+              {{ f === 'all' ? '全部' : judgmentText(f) }}
+            </button>
+          </div>
+          <p v-if="feedbackError" class="history-error">{{ feedbackError }}</p>
+          <p v-if="!feedbackLoading && !feedbackEntries.length && !feedbackError" class="history-empty">
+            暂无反馈标注。
+          </p>
+          <ul v-if="feedbackEntries.length" class="manage-list">
+            <li
+              v-for="entry in feedbackEntries"
+              :key="entry.folder_name"
+              class="manage-row"
+              :class="{ active: selectedFeedbackFolder === entry.folder_name }"
+            >
+              <button type="button" class="manage-row-main" @click="selectedFeedbackFolder = entry.folder_name">
+                <span class="manage-row-top">
+                  <span class="pill sm" :class="feedbackResultText(entry)">{{ feedbackResultText(entry) }}</span>
+                  <span class="history-kind">{{ judgmentText(entry.judgment) }}</span>
+                </span>
+                <span class="history-file">{{ entry.task_id || entry.folder_name }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card manage-detail-card">
+          <template v-if="selectedFeedback">
+            <div class="manage-card-head">
+              <h3 class="section-title tight">反馈详情</h3>
+              <span class="history-kind">{{ selectedFeedback.folder_name }}</span>
+            </div>
+            <div class="manage-detail-layout">
+              <div class="manage-image-frame">
+                <img
+                  v-if="feedbackImageUrl(selectedFeedback)"
+                  :src="feedbackImageUrl(selectedFeedback)"
+                  alt="反馈原图"
+                  class="manage-image"
+                />
+                <p v-else class="history-empty">无可用原图</p>
+              </div>
+              <div class="manage-detail-body">
+                <dl class="manage-facts">
+                  <div><dt>当前标注</dt><dd>{{ judgmentText(selectedFeedback.judgment) }}</dd></div>
+                  <div><dt>AI 原判</dt><dd>{{ feedbackResultText(selectedFeedback) }} · {{ feedbackConfidenceText(selectedFeedback) }}</dd></div>
+                  <div><dt>任务</dt><dd>{{ selectedFeedback.task_id || '—' }}</dd></div>
+                  <div><dt>时间</dt><dd>{{ selectedFeedback.timestamp || selectedFeedback.updated_at || '—' }}</dd></div>
+                </dl>
+                <p class="manage-reason">{{ feedbackReason(selectedFeedback) }}</p>
+                <div class="manage-actions">
+                  <button
+                    type="button"
+                    class="btn btn-feedback btn-feedback-correct"
+                    :disabled="feedbackActionBusy[selectedFeedback.folder_name + ':correct']"
+                    @click="changeFeedbackJudgment(selectedFeedback, 'correct')"
+                  >
+                    确认为正确
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-feedback btn-feedback-wrong"
+                    :disabled="feedbackActionBusy[selectedFeedback.folder_name + ':wrong']"
+                    @click="changeFeedbackJudgment(selectedFeedback, 'wrong')"
+                  >
+                    确认为错误
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-feedback btn-feedback-suspicious"
+                    :disabled="feedbackActionBusy[selectedFeedback.folder_name + ':suspicious']"
+                    @click="changeFeedbackJudgment(selectedFeedback, 'suspicious')"
+                  >
+                    标为疑似
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    :disabled="feedbackActionBusy[selectedFeedback.folder_name + ':delete']"
+                    @click="removeFeedbackEntry(selectedFeedback)"
+                  >
+                    删除标注
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+          <p v-else class="history-empty">请选择一条反馈记录。</p>
+        </div>
+      </section>
+
+      <section v-else-if="manageTab === 'dataset'" class="manage-grid">
+        <div class="card manage-list-card">
+          <div class="manage-card-head">
+            <h3 class="section-title tight">训练样本</h3>
+            <button type="button" class="btn-text-refresh" :disabled="datasetLoading" @click="loadDatasetEntries">
+              {{ datasetLoading ? '加载中…' : '刷新' }}
+            </button>
+          </div>
+          <div v-if="datasetSummary" class="manage-summary-row">
+            <span>总数 {{ datasetSummary.total }}</span>
+            <span>正常 {{ datasetSummary.normal }}</span>
+            <span>篡改 {{ datasetSummary.tampered }}</span>
+            <span>标注 {{ datasetSummary.annotations }}</span>
+          </div>
+          <div class="manage-filter-row">
+            <button
+              v-for="f in (['all', 0, 1] as const)"
+              :key="String(f)"
+              type="button"
+              class="filter-chip"
+              :class="{ active: datasetFilter === f }"
+              @click="datasetFilter = f; loadDatasetEntries()"
+            >
+              {{ f === 'all' ? '全部' : datasetLabelText(f) }}
+            </button>
+            <label class="dataset-toggle">
+              <input v-model="datasetIncludeEnhanced" type="checkbox" @change="loadDatasetEntries" />
+              <span>包含增强样本</span>
+            </label>
+          </div>
+          <p v-if="datasetError" class="history-error">{{ datasetError }}</p>
+          <p v-if="!datasetLoading && !datasetEntries.length && !datasetError" class="history-empty">
+            暂无训练样本。
+          </p>
+          <ul v-if="datasetEntries.length" class="manage-list">
+            <li
+              v-for="entry in datasetEntries"
+              :key="entry.filename"
+              class="manage-row"
+              :class="{ active: selectedDatasetFilename === entry.filename }"
+            >
+              <button type="button" class="manage-row-main" @click="selectDatasetEntry(entry)">
+                <span class="manage-row-top">
+                  <span class="pill sm" :class="datasetPillClass(entry)">{{ datasetLabelText(entry.label) }}</span>
+                  <span v-if="entry.is_enhanced" class="history-kind">增强</span>
+                  <span v-if="entry.has_annotation" class="history-kind">JSON</span>
+                </span>
+                <span class="history-file">{{ entry.filename }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card manage-detail-card">
+          <template v-if="selectedDatasetEntry">
+            <div class="manage-card-head">
+              <h3 class="section-title tight">样本详情</h3>
+              <span class="history-kind">{{ selectedDatasetEntry.filename }}</span>
+            </div>
+            <div class="manage-detail-layout">
+              <div class="manage-image-frame">
+                <img
+                  v-if="datasetImageUrl(selectedDatasetEntry)"
+                  :src="datasetImageUrl(selectedDatasetEntry)"
+                  alt="训练样本"
+                  class="manage-image"
+                />
+                <p v-else class="history-empty">无可用图片</p>
+              </div>
+              <div class="manage-detail-body">
+                <dl class="manage-facts">
+                  <div><dt>训练标签</dt><dd>{{ datasetLabelText(selectedDatasetEntry.label) }}</dd></div>
+                  <div><dt>尺寸</dt><dd>{{ datasetDimsText(selectedDatasetEntry) }}</dd></div>
+                  <div><dt>大小</dt><dd>{{ datasetSizeText(selectedDatasetEntry.size_bytes) }}</dd></div>
+                  <div><dt>标注 JSON</dt><dd>{{ selectedDatasetEntry.json_name || '—' }}</dd></div>
+                </dl>
+                <div class="manage-actions">
+                  <button
+                    type="button"
+                    class="btn btn-feedback btn-feedback-correct"
+                    :disabled="datasetActionBusy[selectedDatasetEntry.filename + ':0']"
+                    @click="changeDatasetLabel(selectedDatasetEntry, 0)"
+                  >
+                    标为正常
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-feedback btn-feedback-wrong"
+                    :disabled="datasetActionBusy[selectedDatasetEntry.filename + ':1']"
+                    @click="changeDatasetLabel(selectedDatasetEntry, 1)"
+                  >
+                    标为篡改
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    :disabled="datasetActionBusy[selectedDatasetEntry.filename + ':delete']"
+                    @click="removeDatasetEntry(selectedDatasetEntry)"
+                  >
+                    删除样本
+                  </button>
+                </div>
+                <div class="dataset-json-panel">
+                  <div class="manage-card-head dataset-json-head">
+                    <h4>区域标注</h4>
+                    <button
+                      type="button"
+                      class="btn-text-refresh"
+                      :disabled="datasetAnnotationLoading || !selectedDatasetEntry.has_annotation"
+                      @click="loadDatasetAnnotation(selectedDatasetEntry)"
+                    >
+                      {{ datasetAnnotationLoading ? '加载中…' : '刷新' }}
+                    </button>
+                  </div>
+                  <p v-if="datasetAnnotationError" class="history-error">{{ datasetAnnotationError }}</p>
+                  <pre v-else-if="datasetAnnotationText()" class="dataset-json">{{ datasetAnnotationText() }}</pre>
+                  <p v-else class="history-empty">无区域标注 JSON。</p>
+                </div>
+              </div>
+            </div>
+          </template>
+          <p v-else class="history-empty">请选择一个训练样本。</p>
+        </div>
+      </section>
+
+      <section v-else class="manage-grid">
+        <div class="card manage-list-card">
+          <div class="manage-card-head">
+            <h3 class="section-title tight">历史记录</h3>
+            <button type="button" class="btn-text-refresh" :disabled="managedHistoryLoading" @click="loadManagedHistory">
+              {{ managedHistoryLoading ? '加载中…' : '刷新' }}
+            </button>
+          </div>
+          <p v-if="managedHistoryError" class="history-error">{{ managedHistoryError }}</p>
+          <p v-if="!managedHistoryLoading && !managedHistoryRows.length && !managedHistoryError" class="history-empty">
+            暂无历史记录。
+          </p>
+          <ul v-if="managedHistoryRows.length" class="manage-list">
+            <li
+              v-for="entry in managedHistoryRows"
+              :key="entry.id"
+              class="manage-row"
+              :class="{ active: selectedManagedHistoryId === entry.id }"
+            >
+              <button type="button" class="manage-row-main" @click="selectedManagedHistoryId = entry.id">
+                <span class="manage-row-top">
+                  <span class="pill sm" :class="historyPillClass(entry)">{{ historyResultLabel(entry) }}</span>
+                  <span class="history-kind">{{ historyKindLabel(entry) || '历史' }}</span>
+                </span>
+                <span class="history-file">{{ entry.fileName }}</span>
+              </button>
+              <button
+                type="button"
+                class="manage-row-delete"
+                :disabled="managedHistoryActionBusy[entry.id]"
+                @click="removeManagedHistory(entry)"
+              >
+                删除
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card manage-detail-card">
+          <template v-if="selectedManagedHistory">
+            <div class="manage-card-head">
+              <h3 class="section-title tight">历史详情</h3>
+              <span class="history-kind">{{ selectedManagedHistory.savedAt }}</span>
+            </div>
+            <div class="manage-detail-layout">
+              <div class="manage-image-frame">
+                <img
+                  v-if="selectedManagedHistory.imageUrl"
+                  :src="selectedManagedHistory.imageUrl"
+                  alt="历史原图"
+                  class="manage-image"
+                />
+                <p v-else class="history-empty">无归档原图</p>
+              </div>
+              <div class="manage-detail-body">
+                <dl class="manage-facts">
+                  <div><dt>文件</dt><dd>{{ selectedManagedHistory.fileName }}</dd></div>
+                  <div><dt>任务</dt><dd>{{ selectedManagedHistory.taskId || '—' }}</dd></div>
+                  <div><dt>结果</dt><dd>{{ historyResultLabel(selectedManagedHistory) }}</dd></div>
+                  <div><dt>类型</dt><dd>{{ historyKindLabel(selectedManagedHistory) || '—' }}</dd></div>
+                </dl>
+                <p class="manage-reason">
+                  {{ selectedManagedHistory.payload.result?.reason || selectedManagedHistory.payload.error_msg || '—' }}
+                </p>
+                <div class="manage-actions">
+                  <button type="button" class="btn btn-secondary" @click="applyHistoryEntry(selectedManagedHistory); showDetectWorkspace()">
+                    打开查看
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    :disabled="managedHistoryActionBusy[selectedManagedHistory.id]"
+                    @click="removeManagedHistory(selectedManagedHistory)"
+                  >
+                    删除历史
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+          <p v-else class="history-empty">请选择一条历史记录。</p>
+        </div>
+      </section>
+    </main>
+
     <Teleport to="body">
       <div
         v-if="previewLightboxOpen && previewLightboxSrc"
@@ -1913,6 +2590,41 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.topbar-tabs {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.topbar-tab {
+  border: 0;
+  border-radius: 6px;
+  padding: 0.42rem 0.72rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.topbar-tab.active {
+  color: var(--brand);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .brand {
   display: flex;
   align-items: flex-start;
@@ -1953,6 +2665,282 @@ onUnmounted(() => {
   grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(260px, 300px);
   gap: 1.25rem;
   align-items: start;
+}
+
+.manage-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1420px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manage-toolbar {
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.manage-title {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.manage-subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.manage-tabs,
+.manage-filter-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.manage-tab,
+.filter-chip {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+
+.manage-tab.active,
+.filter-chip.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: var(--brand);
+}
+
+.manage-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0 0 0.75rem;
+}
+
+.manage-summary-row span {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+  padding: 0.45rem 0.5rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dataset-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 32px;
+  padding: 0 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.manage-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.manage-list-card,
+.manage-detail-card {
+  padding: 1rem;
+}
+
+.manage-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.manage-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.8rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.manage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.manage-row-main {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0.65rem;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.manage-row.active .manage-row-main,
+.manage-row-main:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.manage-row-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.manage-row-delete {
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fff5f5;
+  color: #b91c1c;
+  font-size: 0.74rem;
+  font-weight: 650;
+  padding: 0 0.55rem;
+  cursor: pointer;
+}
+
+.manage-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 42%) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.manage-image-frame {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.manage-image {
+  width: 100%;
+  height: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+  display: block;
+}
+
+.manage-detail-body {
+  min-width: 0;
+}
+
+.manage-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.manage-facts div {
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.manage-facts dt {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  margin-bottom: 0.25rem;
+}
+
+.manage-facts dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.manage-reason {
+  margin: 0.9rem 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 0.84rem;
+}
+
+.manage-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.dataset-json-panel {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.dataset-json-head {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dataset-json-head h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.dataset-json {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 0.75rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 920px) {
+  .manage-grid,
+  .manage-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .manage-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .workspace-wrap {
@@ -3419,7 +4407,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  margin-left: auto;
   font-size: 0.75rem;
   color: #cbd5e1;
 }
