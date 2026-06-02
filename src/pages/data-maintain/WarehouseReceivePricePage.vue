@@ -76,23 +76,21 @@
               <th>库房名称</th>
               <th>回收品类</th>
               <th>收货价格</th>
-              <th>定价日期</th>
-              <th>更新时间</th>
+              <th>价格日期</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="listLoading">
-              <td colspan="5" class="text-center py-4">加载中…</td>
+              <td colspan="4" class="text-center py-4">加载中…</td>
             </tr>
             <tr v-else-if="!listRows.length">
-              <td colspan="5" class="text-center py-4 text-muted">暂无数据</td>
+              <td colspan="4" class="text-center py-4 text-muted">暂无数据</td>
             </tr>
             <tr v-for="row in listRows" :key="`${row.id}-${row.warehouseName}-${row.categoryName}`">
               <td>{{ row.warehouseName }}</td>
               <td>{{ row.categoryName }}</td>
               <td>{{ formatPrice(row.price) }}</td>
               <td>{{ row.priceDate || '—' }}</td>
-              <td>{{ formatTime(row.updatedAt) }}</td>
             </tr>
           </tbody>
         </table>
@@ -154,11 +152,6 @@ function formatApiError(e: unknown, apiHint: string): string {
 function formatPrice(n: number | null): string {
   if (n == null) return '—'
   return `¥ ${n.toLocaleString('zh-CN', { maximumFractionDigits: 4 })}`
-}
-
-function formatTime(t: string): string {
-  if (!t) return '—'
-  return t.replace('T', ' ').slice(0, 19)
 }
 
 function downloadTemplate() {
