@@ -83,10 +83,38 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      position: relative;
+    }
+    .warehouse-select-combo {
+      overflow: visible !important;
+    }
+    .freight-filter-toolbar,
+    .freight-filter-toolbar .form-group,
+    .card.filter-card,
+    .card.filter-card .card-body {
+      overflow: visible !important;
+    }
+    .freight-filter-toolbar label {
+      display: none !important;
+    }
+    .freight-filter-toolbar {
+      gap: 8px !important;
+      align-items: flex-end !important;
+    }
+    .freight-filter-toolbar .form-group {
+      margin-bottom: 0 !important;
     }
     .warehouse-select-list {
+      display: none;
       max-height: 220px;
       overflow: auto;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 10050;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      margin-top: 2px;
       border: 1px solid #ced4da;
       border-radius: 6px;
       background: #fff;
