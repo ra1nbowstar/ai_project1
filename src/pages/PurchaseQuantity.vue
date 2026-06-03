@@ -803,7 +803,7 @@ const canQueryForecast = computed(() => getForecastFilterValidationError() === n
 
 const forecastQueried = ref(false)
 
-const forecastActiveTab = ref<'manager' | 'warehouse' | 'detail'>('manager')
+const forecastActiveTab = ref<'warehouse' | 'manager' | 'detail'>('warehouse')
 
 const chartLoading = ref(false)
 const chartLoadFailed = ref(false)
