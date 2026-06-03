@@ -18,7 +18,7 @@
           <p v-if="latest" class="summary-meta">
             <span>最新报价日期：{{ latest.date }}</span>
           </p>
-          <p v-else-if="!latestLoading && selectedSmelterId" class="summary-meta text-muted">该冶炼厂暂无报价</p>
+          <p v-else-if="!latestLoading && selectedSmelterId" class="summary-meta text-muted"></p>
           <p v-else-if="!selectedSmelterId" class="summary-meta text-muted">请先选择冶炼厂</p>
         </div>
         <button type="button" class="btn btn-secondary" @click="emit('navigateToQuote')">AI 比价报价查询</button>
