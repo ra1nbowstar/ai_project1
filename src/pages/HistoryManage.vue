@@ -122,10 +122,8 @@
             <label>大区经理</label>
             <div class="multi-select-container">
               <div class="selected-tags" :class="multiSelectTagsClass(selectedManagers)" @click="focusManagerInput">
-                <span v-for="item in mgrManagersTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeManager(item)">×</button>
-                </span>
+                <span v-for="item in mgrManagersTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in mgrManagersTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeManager(item)">×</button>
                 <span
                   v-if="mgrManagersTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -162,10 +160,8 @@
             <label>冶炼厂</label>
             <div class="multi-select-container multi-select-container--wide">
               <div class="selected-tags" :class="multiSelectTagsClass(selectedSmelters)" @click="focusSmelterInput">
-                <span v-for="item in mgrSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeSmelter(item)">×</button>
-                </span>
+                <span v-for="item in mgrSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in mgrSmeltersTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeSmelter(item)">×</button>
                 <span
                   v-if="mgrSmeltersTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -202,10 +198,8 @@
             <label>仓库</label>
             <div class="multi-select-container multi-select-container--wide">
               <div class="selected-tags" :class="multiSelectTagsClass(selectedWarehouses)" @click="focusWarehouseInput">
-                <span v-for="item in whWarehousesTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeWarehouse(item)">×</button>
-                </span>
+                <span v-for="item in whWarehousesTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in whWarehousesTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeWarehouse(item)">×</button>
                 <span
                   v-if="whWarehousesTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -242,10 +236,8 @@
             <label>品种</label>
             <div class="multi-select-container">
               <div class="selected-tags" :class="multiSelectTagsClass(selectedVarieties)" @click="focusVarietyInput">
-                <span v-for="item in varietyTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeVariety(item)">×</button>
-                </span>
+                <span v-for="item in varietyTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in varietyTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeVariety(item)">×</button>
                 <span
                   v-if="varietyTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -420,7 +412,7 @@ import * as XLSX from 'xlsx'
 import { ApiPaths } from '@/api/paths'
 import { DELIVERY_HISTORY_FETCH_PAGE_SIZE } from '@/api/fetchLimits'
 import { fetchDeliveryHistoryDimensionOptions } from '@/api/dimensionOptions'
-import { fetchTlCategories } from '@/api/tlApi'
+import { fetchCategoryMapping } from '@/api/tlApi'
 
 // ==================== 类型定义 ====================
 interface HistoryRecord {
@@ -525,6 +517,9 @@ const varietyDropdownVisible = ref(false)
 const varietyInputRef = ref<HTMLInputElement>()
 const allVarietyOptions = ref<string[]>([])
 const filteredVarietyOptions = ref<string[]>([])
+
+/** 与电子地图/比价系统一致的 10 个固定回收品类 */
+const FIXED_CATEGORY_IDS: readonly number[] = [6, 4, 15, 11, 16, 2, 5, 17, 12, 3]
 
 // 标签预览常量
 const MULTI_PREVIEW_TAG_COUNT = 1
@@ -843,14 +838,16 @@ const fetchOptions = async () => {
   try {
     const [dims, categories] = await Promise.all([
       fetchDeliveryHistoryDimensionOptions(),
-      fetchTlCategories().catch(() => []),
+      fetchCategoryMapping().catch(() => []),
     ])
     allManagerOptions.value = dims.regional_managers
     allSmelterOptions.value = dims.smelters
     allWarehouseOptions.value = dims.warehouses
-    // 品类去重并排序
-    const uniqueVarieties = [...new Set(categories.map((c) => c.name).filter((n) => n !== ''))]
-    allVarietyOptions.value = uniqueVarieties.sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    // 仅保留固定 10 个品类，按固定 id 顺序排列
+    const idToName = new Map(categories.map((c) => [c.id, c.name]))
+    allVarietyOptions.value = FIXED_CATEGORY_IDS
+      .map((id) => idToName.get(id) ?? '')
+      .filter((n) => n !== '')
 
     filteredManagerOptions.value = [...allManagerOptions.value]
     filteredSmelterOptions.value = [...allSmelterOptions.value]
@@ -1275,8 +1272,8 @@ onMounted(() => {
 .multi-select-item--wide { min-width: 300px; max-width: 380px; flex: 1 1 300px; }
 .multi-select-container { position: relative; width: 100%; max-width: 280px; overflow: visible; }
 .multi-select-container--wide { max-width: 100%; }
-.selected-tags { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid #E5E9F2; border-radius: 4px; background: white; height: 32px; min-height: 32px; max-height: 32px; overflow: hidden; cursor: text; box-sizing: border-box; }
-.tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: #E8F0F8; border-radius: 3px; font-size: 12px; color: #2c3e50; max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selected-tags { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid #E5E9F2; border-radius: 4px; background: white; height: 32px; min-height: 32px; max-height: 32px; overflow-x: auto; overflow-y: hidden; cursor: text; box-sizing: border-box; }
+.tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: #E8F0F8; border-radius: 3px; font-size: 12px; color: #2c3e50; max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
 .tag-remove { background: none; border: none; cursor: pointer; font-size: 14px; color: #909399; padding: 0 2px; }
 .tag-remove:hover { color: #f56c6c; }
 .tag-shrink { flex-shrink: 0; }

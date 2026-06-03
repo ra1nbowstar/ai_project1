@@ -59,10 +59,8 @@
                 :class="multiSelectTagsClass(forecastMgrSelectedManagers)"
                 @click="focusMgrManagerInput"
               >
-                <span v-for="item in mgrManagersTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeMgrManager(item)">×</button>
-                </span>
+                <span v-for="item in mgrManagersTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in mgrManagersTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeMgrManager(item)">×</button>
                 <span
                   v-if="mgrManagersTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -102,10 +100,8 @@
                 :class="multiSelectTagsClass(forecastMgrSelectedSmelters)"
                 @click="focusMgrSmelterInput"
               >
-                <span v-for="item in mgrSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeMgrSmelter(item)">×</button>
-                </span>
+                <span v-for="item in mgrSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in mgrSmeltersTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeMgrSmelter(item)">×</button>
                 <span
                   v-if="mgrSmeltersTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -176,10 +172,8 @@
                 :class="multiSelectTagsClass(forecastWhSelectedWarehouses)"
                 @click="focusWhWarehouseInput"
               >
-                <span v-for="item in whWarehousesTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeWhWarehouse(item)">×</button>
-                </span>
+                <span v-for="item in whWarehousesTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in whWarehousesTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeWhWarehouse(item)">×</button>
                 <span
                   v-if="whWarehousesTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -219,10 +213,8 @@
                 :class="multiSelectTagsClass(forecastWhSelectedSmelters)"
                 @click="focusWhSmelterInput"
               >
-                <span v-for="item in whSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeWhSmelter(item)">×</button>
-                </span>
+                <span v-for="item in whSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in whSmeltersTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeWhSmelter(item)">×</button>
                 <span
                   v-if="whSmeltersTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -293,10 +285,8 @@
                 :class="multiSelectTagsClass(detailSelectedWarehouses)"
                 @click="focusDetailWarehouseInput"
               >
-                <span v-for="item in detailWarehousesTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeDetailWarehouse(item)">×</button>
-                </span>
+                <span v-for="item in detailWarehousesTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in detailWarehousesTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeDetailWarehouse(item)">×</button>
                 <span
                   v-if="detailWarehousesTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -336,10 +326,8 @@
                 :class="multiSelectTagsClass(detailSelectedSmelters)"
                 @click="focusDetailSmelterInput"
               >
-                <span v-for="item in detailSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeDetailSmelter(item)">×</button>
-                </span>
+                <span v-for="item in detailSmeltersTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in detailSmeltersTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeDetailSmelter(item)">×</button>
                 <span
                   v-if="detailSmeltersTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -379,10 +367,8 @@
                 :class="multiSelectTagsClass(detailSelectedVarieties)"
                 @click="focusDetailVarietyInput"
               >
-                <span v-for="item in detailVarietiesTagsPreview" :key="item" class="tag tag-shrink" :title="item">
-                  {{ item }}
-                  <button type="button" class="tag-remove" @click.stop="removeDetailVariety(item)">×</button>
-                </span>
+                <span v-for="item in detailVarietiesTagsPreview" :key="item" class="tag tag-shrink" :title="item">{{ item }}</span>
+                <button v-for="item in detailVarietiesTagsPreview" :key="'rm-' + item" type="button" class="tag-remove" @click.stop="removeDetailVariety(item)">×</button>
                 <span
                   v-if="detailVarietiesTagsMore > 0"
                   class="tag tag-more tag-shrink"
@@ -675,8 +661,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, type Ref } from 'vue'
-import { fetchPredictDimensionOptions } from '../api/dimensionOptions'
-import { fetchTlCategories } from '../api/tlApi'
+import axios from 'axios'
+import { ApiPaths } from '../api/paths'
+import { FORECAST_DETAILS_FETCH_PAGE_SIZE } from '../api/fetchLimits'
+import { fetchForecastDimensionOptions } from '../api/dimensionOptions'
+import { fetchCategoryMapping } from '../api/tlApi'
 import {
   fetchAllPredictResults,
   aggregateChartFromResults,
@@ -780,7 +769,7 @@ const canQueryForecast = computed(() => getForecastFilterValidationError() === n
 
 const forecastQueried = ref(false)
 
-const forecastActiveTab = ref<'manager' | 'warehouse' | 'detail'>('manager')
+const forecastActiveTab = ref<'warehouse' | 'manager' | 'detail'>('warehouse')
 
 const chartLoading = ref(false)
 const chartSummaryText = ref('')
@@ -971,6 +960,9 @@ const allWarehouseOptions = ref<string[]>([])
 const allManagerOptions = ref<string[]>([])
 const allSmelterOptions = ref<string[]>([])
 const allProductVarietyOptions = ref<string[]>([])
+
+/** 与电子地图/比价系统一致的 10 个固定回收品类 */
+const FIXED_CATEGORY_IDS: readonly number[] = [6, 4, 15, 11, 16, 2, 5, 17, 12, 3]
 
 const MULTI_PREVIEW_TAG_COUNT = 1
 const DEFAULT_SMELTER = '河南金利金铅集团有限公司'
@@ -1365,19 +1357,21 @@ function refreshAllFilterOptionLists() {
   filterDetailVarietyOptions()
 }
 
-// ==================== 获取下拉选项（智能预测 v2：/predict/dimension-options + /tl/get_categories） ====================
+// ==================== 获取下拉选项（PRD 规则预测：/forecast/dimension-options + /tl/get_category_mapping） ====================
 async function fetchOptions() {
   try {
     const [dims, categories] = await Promise.all([
-      fetchPredictDimensionOptions(),
-      fetchTlCategories().catch(() => []),
+      fetchForecastDimensionOptions(),
+      fetchCategoryMapping().catch(() => []),
     ])
     allWarehouseOptions.value = dims.warehouses
     allManagerOptions.value = dims.regional_managers
     allSmelterOptions.value = dims.smelters
-    // 品类去重并排序
-    const uniqueVarieties = [...new Set(categories.map((c) => c.name).filter((n) => n !== ''))]
-    allProductVarietyOptions.value = uniqueVarieties.sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    // 仅保留固定 10 个品类，按固定 id 顺序排列
+    const idToName = new Map(categories.map((c) => [c.id, c.name]))
+    allProductVarietyOptions.value = FIXED_CATEGORY_IDS
+      .map((id) => idToName.get(id) ?? '')
+      .filter((n) => n !== '')
 
     refreshAllFilterOptionLists()
   } catch (error) {
@@ -1388,6 +1382,35 @@ async function fetchOptions() {
     allProductVarietyOptions.value = []
     refreshAllFilterOptionLists()
   }
+}
+
+/** 从「送货量预测/明细」返回的 items 合并冶炼厂到下拉（去重、中文排序） */
+function mergeSmelterOptionsFromForecastItems(items: ForecastDetailItem[]) {
+  const merged = new Set<string>(allSmelterOptions.value)
+  for (const d of items) {
+    const s = d.smelter
+    if (s == null) continue
+    const t = String(s).trim()
+    if (t !== '') merged.add(t)
+  }
+  allSmelterOptions.value = [...merged].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+  filterMgrSmelterOptions()
+  filterWhSmelterOptions()
+  filterDetailSmelterOptions()
+}
+
+/** 从预测明细 items 中合并品类到下拉（仅保留固定 10 品种范围内的值） */
+function mergeVarietyOptionsFromForecastItems(items: ForecastDetailItem[]) {
+  const allowed = new Set(allProductVarietyOptions.value)
+  const merged = new Set(allProductVarietyOptions.value)
+  for (const d of items) {
+    const v = d.product_variety
+    if (v == null) continue
+    const t = String(v).trim()
+    if (t !== '' && t !== '—' && allowed.has(t)) merged.add(t)
+  }
+  allProductVarietyOptions.value = [...merged]
+  filterDetailVarietyOptions()
 }
 
 // ---------- 按大区经理：大区经理 ----------
@@ -2648,7 +2671,8 @@ onMounted(async () => {
   height: 32px;
   min-height: 32px;
   max-height: 32px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   cursor: text;
   box-sizing: border-box;
 }
@@ -2688,6 +2712,7 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 118px;
+  flex-shrink: 0;
 }
 
 .tag-shrink {

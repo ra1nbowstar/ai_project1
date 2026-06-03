@@ -4848,8 +4848,6 @@ async function onWarehouseDistanceMonitorClick() {
     }
     return
   }
-  comparisonSectionCollapsed.value = true
-  forecastSectionCollapsed.value = true
   comparisonModalVisible.value = true
   const title = wh.title?.trim()
   comparisonModalTitle.value = title ? `库房距离监测：${title}` : '库房距离监测'
@@ -4858,6 +4856,8 @@ async function onWarehouseDistanceMonitorClick() {
   warehouseDistanceLoading.value = true
   try {
     await drawWarehouseBindingDistanceLines(wh)
+    comparisonSectionCollapsed.value = true
+    forecastSectionCollapsed.value = true
     warehouseDistanceMonitorOn.value = true
     compareError.value = ''
   } catch (e) {
@@ -5204,13 +5204,11 @@ function openComparisonModal() {
   if (warehouseDistanceMonitorOn.value) {
     exitWarehouseDistanceMonitorMode(false)
   }
-  const wasVisible = comparisonModalVisible.value
   const wh = selectedWarehouse.value?.title?.trim()
   comparisonModalTitle.value = wh ? `比价预测结果：${wh}` : '比价预测结果'
-  if (!wasVisible) {
-    comparisonSectionCollapsed.value = false
-    forecastSectionCollapsed.value = false
-  }
+  compareError.value = ''
+  comparisonSectionCollapsed.value = false
+  forecastSectionCollapsed.value = false
   comparisonModalVisible.value = true
   const sel = selectedWarehouse.value
   if (sel && comparisonRanks.value.length) {
