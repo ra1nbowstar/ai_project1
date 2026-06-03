@@ -401,7 +401,8 @@
         </div>
     </div>
 
-    <div class="card chart-summary-card">
+    <!-- 预测趋势图表暂时隐藏，待图表与文本一致后再显示 -->
+    <div v-if="false" class="card chart-summary-card">
       <div class="result-label">
         <span>预测趋势（汇总）</span>
         <span v-if="chartLoading" class="unit-hint">加载中…</span>
