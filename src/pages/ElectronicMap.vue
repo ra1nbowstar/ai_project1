@@ -945,7 +945,6 @@ import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
 import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import axios from 'axios'
-import { ApiPaths } from '../api/paths'
 import PredictionAnalysisDrawer from '../components/PredictionAnalysisDrawer.vue'
 import ForecastBasisPanel from '../components/ForecastBasisPanel.vue'
 import { triggerPrediction, fetchAllPredictResults, aggregateChartFromResults, type PredictResultRow } from '../api/predictApi'
@@ -1537,7 +1536,7 @@ watch(categoryPrefs, () => {
 }, { deep: true })
 
 /** 仓库切换时：清空预测数据 */
-watch(selectedWarehouse, (wh) => {
+watch(selectedWarehouse, () => {
   forecastModalDates.value = []
   forecastModalValues.value = []
   forecastDetailRows.value = []
