@@ -61,7 +61,7 @@ const v3SpecifyBbox = ref(false)
 const documentTime = ref('')
 
 /** 可多选：勾选哪种就使用哪种，两项都勾选则并行 */
-const useModelDetection = ref(true)
+const useModelDetection = ref(false)
 const useRuleDetection = ref(true)
 
 const drawing = ref(false)
@@ -87,6 +87,7 @@ const v3Payload = ref<V3ViewPayload | null>(null)
 const ruleCheckPayload = ref<RuleChecksData | null>(null)
 const ruleCheckLoading = ref(false)
 const ruleCheckError = ref<string | null>(null)
+const ruleCheckElapsed = ref<number | null>(null)
 
 const ruleCheckVerdictInfo = computed(() => ruleCheckVerdict(ruleCheckPayload.value))
 const ruleCheckUserView = computed(() => buildRuleCheckUserView(ruleCheckPayload.value))
@@ -322,6 +323,7 @@ function resetRuleCheck() {
   ruleCheckPayload.value = null
   ruleCheckError.value = null
   ruleCheckLoading.value = false
+  ruleCheckElapsed.value = null
 }
 
 function resetResults() {
@@ -390,6 +392,7 @@ function applyLinkedRuleChecksFromPoll(
   }
   ruleCheckError.value = null
   ruleCheckLoading.value = false
+  ruleCheckElapsed.value = null
 }
 
 function v3PayloadFromPoll(data: Awaited<ReturnType<typeof getV3Result>>): V3ViewPayload {
@@ -717,17 +720,21 @@ async function startRuleChecks(
   ruleCheckLoading.value = true
   ruleCheckError.value = null
   ruleCheckPayload.value = null
+  ruleCheckElapsed.value = null
+  const t0 = performance.now()
   try {
     const data = await submitRuleChecks(file, bbox, {
       ...detectSubmitOpts(signal),
       task_id: taskId,
     })
     ruleCheckPayload.value = data
+    ruleCheckElapsed.value = Math.round(performance.now() - t0)
     return data
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e
     const message = e instanceof Error ? e.message : String(e)
     ruleCheckError.value = message || '规则检测失败'
+    ruleCheckElapsed.value = Math.round(performance.now() - t0)
     throw e
   } finally {
     ruleCheckLoading.value = false
@@ -1345,6 +1352,7 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
   ruleCheckPayload.value = entry.ruleCheck ?? null
   ruleCheckError.value = null
   ruleCheckLoading.value = false
+  ruleCheckElapsed.value = null
   currentTaskFeedbackStatus.value = entry.feedbackStatus ?? null
   // 后端返回的 imageUrl 应为完整的资源路径（通常以 /ai-detection 开头），
   // 前端不得再统一 prepend 公共 /api/v1 前缀，避免生成错误路径。
@@ -1402,6 +1410,7 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
       v3Payload.value = clonePayloadForView(entry.payload)
       ruleCheckPayload.value = expectRule ? entry.ruleCheck ?? emptyLinkedRuleChecks() : null
       ruleCheckLoading.value = false
+      ruleCheckElapsed.value = null
     }
     if (entry.taskId) void loadViz(entry.taskId)
   } else {
@@ -1691,8 +1700,8 @@ onUnmounted(() => {
         <div class="brand">
           <span class="brand-mark" aria-hidden="true" />
           <div>
-            <h1 class="brand-title">图像真伪检测</h1>
-            <p class="brand-sub">检测图像是否存在后期篡改风险</p>
+            <h1 class="brand-title">图片真伪检测</h1>
+            <p class="brand-sub">检测图片是否存在后期篡改风险</p>
           </div>
         </div>
         <div class="topbar-actions">
@@ -2122,6 +2131,11 @@ onUnmounted(() => {
                   :class="ruleCheckVerdictInfo.pillClass || undefined"
                   >{{ ruleCheckVerdictInfo.label }}</span
                 >
+                <span v-if="ruleCheckElapsed != null" class="rule-check-elapsed">{{
+                  ruleCheckElapsed >= 1000
+                    ? (ruleCheckElapsed / 1000).toFixed(1) + ' 秒'
+                    : ruleCheckElapsed + ' ms'
+                }}</span>
                 <p class="rule-check-reason">{{ ruleCheckUserView.summary }}</p>
               </div>
 
@@ -4498,6 +4512,16 @@ onUnmounted(() => {
 
 .rule-check-summary {
   margin-bottom: 0.75rem;
+}
+
+.rule-check-elapsed {
+  margin-left: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted, #6c757d);
+  background: var(--bg-muted, rgba(128, 128, 128, 0.1));
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  vertical-align: middle;
 }
 
 .rule-check-reason {
