@@ -41,6 +41,8 @@
                 type="date"
                 v-model="forecastMgrFilters.startDate"
                 class="filter-input"
+                :min="dateMin"
+                :max="dateMax"
                 @change="validateMgrForecastDateRange"
               />
               <span>至</span>
@@ -48,6 +50,8 @@
                 type="date"
                 v-model="forecastMgrFilters.endDate"
                 class="filter-input"
+                :min="dateMin"
+                :max="dateMax"
                 @change="validateMgrForecastDateRange"
               />
             </div>
@@ -154,6 +158,8 @@
                 type="date"
                 v-model="forecastWhFilters.startDate"
                 class="filter-input"
+                :min="dateMin"
+                :max="dateMax"
                 @change="validateWhForecastDateRange"
               />
               <span>至</span>
@@ -161,6 +167,8 @@
                 type="date"
                 v-model="forecastWhFilters.endDate"
                 class="filter-input"
+                :min="dateMin"
+                :max="dateMax"
                 @change="validateWhForecastDateRange"
               />
             </div>
@@ -261,6 +269,8 @@
                 type="date"
                 v-model="detailTabFilters.startDate"
                 class="filter-input"
+                :min="dateMin"
+                :max="dateMax"
                 @change="validateDetailTabDateRange"
               />
               <span>至</span>
@@ -268,6 +278,8 @@
                 type="date"
                 v-model="detailTabFilters.endDate"
                 class="filter-input"
+                :min="dateMin"
+                :max="dateMax"
                 @change="validateDetailTabDateRange"
               />
             </div>
@@ -732,6 +744,13 @@ const chartEmptyHint = computed(() =>
     : '请先完成筛选条件并点击「查询」获取预测数据。',
 )
 
+const dateMin = computed(() => new Date().toISOString().slice(0, 10))
+const dateMax = computed(() => {
+  const d = new Date()
+  d.setDate(d.getDate() + 15)
+  return d.toISOString().slice(0, 10)
+})
+
 function getForecastFilterValidationError(): string | null {
   const tab = forecastActiveTab.value
   if (tab === 'detail') {
@@ -1059,11 +1078,11 @@ const closeErrorModal = () => {
   errorModalDetails.value = []
 }
 
-/** PRD：默认 [当天, 当天+14天]（共 15 天） */
+/** 默认 [当天, 当天+15天]（共 16 天），输入框 min/max 同步限制 */
 function defaultForecastDateRange(): { startDate: string; endDate: string } {
   const start = new Date()
   const end = new Date(start)
-  end.setDate(end.getDate() + 14)
+  end.setDate(end.getDate() + 15)
   const fmt = (d: Date) => d.toISOString().slice(0, 10)
   return { startDate: fmt(start), endDate: fmt(end) }
 }
