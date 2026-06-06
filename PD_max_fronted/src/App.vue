@@ -88,6 +88,7 @@ const ruleCheckPayload = ref<RuleChecksData | null>(null)
 const ruleCheckLoading = ref(false)
 const ruleCheckError = ref<string | null>(null)
 const ruleCheckElapsed = ref<number | null>(null)
+const aiElapsed = ref<number | null>(null)
 
 const ruleCheckVerdictInfo = computed(() => ruleCheckVerdict(ruleCheckPayload.value))
 const ruleCheckUserView = computed(() => buildRuleCheckUserView(ruleCheckPayload.value))
@@ -324,6 +325,7 @@ function resetRuleCheck() {
   ruleCheckError.value = null
   ruleCheckLoading.value = false
   ruleCheckElapsed.value = null
+  aiElapsed.value = null
 }
 
 function resetResults() {
@@ -393,6 +395,7 @@ function applyLinkedRuleChecksFromPoll(
   ruleCheckError.value = null
   ruleCheckLoading.value = false
   ruleCheckElapsed.value = null
+  aiElapsed.value = null
 }
 
 function v3PayloadFromPoll(data: Awaited<ReturnType<typeof getV3Result>>): V3ViewPayload {
@@ -721,6 +724,7 @@ async function startRuleChecks(
   ruleCheckError.value = null
   ruleCheckPayload.value = null
   ruleCheckElapsed.value = null
+  aiElapsed.value = null
   const t0 = performance.now()
   try {
     const data = await submitRuleChecks(file, bbox, {
@@ -1353,6 +1357,7 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
   ruleCheckError.value = null
   ruleCheckLoading.value = false
   ruleCheckElapsed.value = null
+  aiElapsed.value = null
   currentTaskFeedbackStatus.value = entry.feedbackStatus ?? null
   // 后端返回的 imageUrl 应为完整的资源路径（通常以 /ai-detection 开头），
   // 前端不得再统一 prepend 公共 /api/v1 前缀，避免生成错误路径。
@@ -1411,6 +1416,7 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
       ruleCheckPayload.value = expectRule ? entry.ruleCheck ?? emptyLinkedRuleChecks() : null
       ruleCheckLoading.value = false
       ruleCheckElapsed.value = null
+      aiElapsed.value = null
     }
     if (entry.taskId) void loadViz(entry.taskId)
   } else {
@@ -1547,7 +1553,11 @@ async function runV3() {
       ? '预计等待约 1 分钟（含辅助核查，按每张约 1 分钟估算）'
       : '预计等待约 1 分钟（按每张约 1 分钟估算）'
     await waitMs(300)
+    const t0 = performance.now()
     const { taskId, payload } = await runV3AsyncOne(one, bbox, '检测', ac.signal, runRule)
+    const elapsed = Math.round(performance.now() - t0)
+    aiElapsed.value = elapsed
+    if (runRule) ruleCheckElapsed.value = elapsed
     v3TaskId.value = taskId
     v3Payload.value = payload
     pollStatus.value = '分析完成'
@@ -1606,10 +1616,14 @@ async function runV3Batch(files: File[]) {
       const f = files[i]!
       const prefix = `批量检测 ${i + 1}/${files.length}`
       try {
+        const t0 = performance.now()
         const { taskId, payload } = await runV3AsyncOne(f, null, prefix, ac.signal, runRule)
+        const elapsed = Math.round(performance.now() - t0)
         success += 1
         lastTaskId = taskId
         lastPayload = payload
+        aiElapsed.value = elapsed
+        if (runRule) ruleCheckElapsed.value = elapsed
         void refreshHistoryList()
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') throw e
@@ -2028,6 +2042,11 @@ onUnmounted(() => {
                   :class="aiReportResult.result || undefined"
                   >{{ aiReportResult.result || '—' }}</span
                 >
+                <span v-if="aiElapsed != null" class="rule-check-elapsed">{{
+                  aiElapsed >= 1000
+                    ? (aiElapsed / 1000).toFixed(1) + ' 秒'
+                    : aiElapsed + ' ms'
+                }}</span>
                 <div class="meter-wrap">
                   <div class="meter-label">
                     <span>风险倾向</span>
