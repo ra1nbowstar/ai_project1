@@ -66,7 +66,14 @@ function buildAiDetectionProxy(env: Record<string, string>): Record<string, Prox
   const raw = (env.VITE_AI_DETECTION_TARGET || env.VITE_API_TARGET || DEFAULT_API_ORIGIN).trim()
   const target = raw.replace(/\/+$/, '')
   const secure = proxySecureFlag(env)
-  const common = { target, changeOrigin: true, secure } satisfies ProxyOptions
+  // AI 检测涉及大图片上传和长时间推理，设置较长的超时（与 PD_max_fronted 独立运行一致）
+  const common = {
+    target,
+    changeOrigin: true,
+    secure,
+    proxyTimeout: 600_000,
+    timeout: 600_000,
+  } satisfies ProxyOptions
   return {
     '/ai-detection': common,
   }

@@ -36,3 +36,4 @@ dist-ssr
 *.sw?
 CLAUDE.md
 *.cmd
+/test
