@@ -2958,6 +2958,8 @@
           records: [],
           editingId: null,
           latestRecord: null,
+          displayDateFrom: '',
+          displayDateTo: '',
         }
 
         function tokenHeaders() {
@@ -3115,7 +3117,7 @@
                   </div>
                   <div class="table-responsive">
                     <table class="data-table">
-                      <thead><tr><th>冶炼厂</th><th>加价金额</th><th>生效日期</th><th>较上一日</th><th>备注</th><th>操作人</th><th>记录时间</th></tr></thead>
+                      <thead><tr><th>冶炼厂</th><th>加价金额</th><th>生效日期</th><th>较昨日最后一条</th><th>备注</th><th>操作人</th><th>记录时间</th></tr></thead>
                       <tbody id="xrb-records-body"><tr><td colspan="7">加载中...</td></tr></tbody>
                     </table>
                   </div>
@@ -3254,7 +3256,10 @@
           const q = new URLSearchParams()
           const fid = selectedFactoryId(ui)
           if (fid) q.set('factory_id', String(fid))
-          if (ui.dateFrom?.value) q.set('date_from', ui.dateFrom.value)
+          state.displayDateFrom = String(ui.dateFrom?.value || '').trim()
+          state.displayDateTo = String(ui.dateTo?.value || '').trim()
+          const queryDateFrom = state.displayDateFrom ? addDaysYmd(state.displayDateFrom, -1) : ''
+          if (queryDateFrom) q.set('date_from', queryDateFrom)
           if (ui.dateTo?.value) q.set('date_to', ui.dateTo.value)
           try {
             const json = await requestJson(`${LIST_PATH}${q.toString() ? `?${q}` : ''}`)
@@ -3268,7 +3273,44 @@
         }
 
         function sortedRecords() {
-          return [...state.records].sort((a, b) => String(b.effectiveDate || '').localeCompare(String(a.effectiveDate || '')))
+          return [...state.records].sort((a, b) => {
+            const dateDiff = String(b.effectiveDate || '').localeCompare(String(a.effectiveDate || ''))
+            if (dateDiff) return dateDiff
+            const timeDiff = String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+            if (timeDiff) return timeDiff
+            return Number(b.id || 0) - Number(a.id || 0)
+          })
+        }
+
+        function visibleRecords() {
+          return sortedRecords().filter((r) => {
+            if (state.displayDateFrom && r.effectiveDate < state.displayDateFrom) return false
+            if (state.displayDateTo && r.effectiveDate > state.displayDateTo) return false
+            return true
+          })
+        }
+
+        function addDaysYmd(dateStr, delta) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) return ''
+          const d = new Date(`${dateStr}T00:00:00`)
+          if (Number.isNaN(d.getTime())) return ''
+          d.setDate(d.getDate() + delta)
+          const y = d.getFullYear()
+          const m = String(d.getMonth() + 1).padStart(2, '0')
+          const day = String(d.getDate()).padStart(2, '0')
+          return `${y}-${m}-${day}`
+        }
+
+        function sameFactory(a, b) {
+          if (!a || !b) return false
+          if (a.factoryId && b.factoryId) return Number(a.factoryId) === Number(b.factoryId)
+          return String(a.factoryName || '') === String(b.factoryName || '')
+        }
+
+        function lastRecordOfYesterday(row) {
+          const yesterday = addDaysYmd(row?.effectiveDate, -1)
+          if (!yesterday) return null
+          return sortedRecords().find((r) => sameFactory(r, row) && r.effectiveDate === yesterday) || null
         }
 
         function formatChange(cur, prev) {
@@ -3286,7 +3328,7 @@
           if (!ui.dailyChange) return
           const rows = sortedRecords().filter((r) => r.premium != null && r.effectiveDate)
           const latest = state.latestRecord || rows[0]
-          const prev = rows.find((r) => latest && r.effectiveDate < latest.effectiveDate)
+          const prev = latest ? lastRecordOfYesterday(latest) : null
           const change = latest && prev ? formatChange(latest.premium, prev.premium) : { text: '-', cls: 'xrb-change-flat' }
           ui.dailyChange.textContent = change.text
           ui.dailyChange.className = `xrb-summary-value ${change.cls}`
@@ -3295,14 +3337,15 @@
         function renderRecords() {
           const ui = getUi()
           if (!ui.recordsBody) return
-          if (!state.records.length) {
+          const rows = visibleRecords()
+          if (!rows.length) {
             ui.recordsBody.innerHTML = '<tr><td colspan="7">暂无历史价格记录</td></tr>'
             return
           }
-          ui.recordsBody.innerHTML = sortedRecords()
-            .map((r, idx, arr) => {
+          ui.recordsBody.innerHTML = rows
+            .map((r) => {
               const factoryName = r.factoryName || state.smelters.find((s) => s.id === r.factoryId)?.name || '-'
-              const prev = arr[idx + 1]
+              const prev = lastRecordOfYesterday(r)
               const change = prev ? formatChange(r.premium, prev.premium) : { text: '-', cls: 'xrb-change-flat' }
               return `<tr data-id="${esc(r.id)}">
                 <td>${esc(factoryName)}</td>
