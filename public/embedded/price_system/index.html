@@ -2793,6 +2793,699 @@
       })()
     </script>
     <style>
+      .xrb-premium-page .xrb-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .xrb-premium-page .xrb-summary-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 12px 14px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+      }
+      .xrb-premium-page .xrb-summary-label {
+        margin: 0 0 6px;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .xrb-premium-page .xrb-summary-value {
+        margin: 0;
+        font-size: 24px;
+        line-height: 1.1;
+        font-weight: 800;
+        color: #0f172a;
+      }
+      .xrb-premium-page .xrb-summary-note {
+        margin: 6px 0 0;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .xrb-premium-page .xrb-form-grid,
+      .xrb-premium-page .xrb-filter-grid {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 10px;
+        align-items: end;
+      }
+      .xrb-premium-page .xrb-col-2 { grid-column: span 2; }
+      .xrb-premium-page .xrb-col-3 { grid-column: span 3; }
+      .xrb-premium-page .xrb-col-4 { grid-column: span 4; }
+      .xrb-premium-page .xrb-col-6 { grid-column: span 6; }
+      .xrb-premium-page .xrb-col-12 { grid-column: 1 / -1; }
+      .xrb-premium-page .xrb-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+      }
+      .xrb-premium-page .xrb-page-headline {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .xrb-premium-page .xrb-msg {
+        min-height: 18px;
+        margin: 8px 0 0;
+        font-size: 12px;
+        color: #0f766e;
+      }
+      .xrb-premium-page .xrb-err {
+        min-height: 18px;
+        margin: 8px 0 0;
+        font-size: 12px;
+        color: #b42318;
+      }
+      .xrb-premium-page .xrb-chip {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid #99f6e4;
+        border-radius: 6px;
+        padding: 2px 8px;
+        background: #f0fdfa;
+        color: #0f766e;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .xrb-premium-page .xrb-change-up { color: #b42318; }
+      .xrb-premium-page .xrb-change-down { color: #0f766e; }
+      .xrb-premium-page .xrb-change-flat { color: #475569; }
+      .xrb-premium-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 10060;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(15, 23, 42, 0.45);
+      }
+      .xrb-premium-modal.is-open {
+        display: flex;
+      }
+      .xrb-premium-modal .xrb-modal-card {
+        width: min(520px, 100%);
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+      }
+      .xrb-premium-modal .xrb-modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .xrb-premium-modal .xrb-modal-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .xrb-premium-modal .xrb-modal-body {
+        padding: 16px;
+      }
+      .home-page .module-card.module-card--xrb-premium {
+        border: 1px solid #99f6e4;
+        background: linear-gradient(180deg, #f8fffd 0%, #fff 100%);
+        box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.08);
+      }
+      .home-page .module-card.module-card--xrb-premium .module-icon {
+        background: #ccfbf1;
+        color: #0f766e;
+      }
+      .home-page .module-card.module-card--xrb-premium .module-info h4 {
+        color: #115e59;
+        margin: 0 0 4px 0;
+      }
+      .home-page .module-card.module-card--xrb-premium .module-info p {
+        color: #475569;
+        margin: 0;
+      }
+      @media (max-width: 900px) {
+        .xrb-premium-page .xrb-summary-grid {
+          grid-template-columns: 1fr;
+        }
+        .xrb-premium-page .xrb-col-2,
+        .xrb-premium-page .xrb-col-3,
+        .xrb-premium-page .xrb-col-4,
+        .xrb-premium-page .xrb-col-6,
+        .xrb-premium-page .xrb-col-12 {
+          grid-column: 1 / -1;
+        }
+        .xrb-premium-page .xrb-actions {
+          justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+        .xrb-premium-page .xrb-page-headline {
+          flex-direction: column;
+        }
+      }
+    </style>
+    <script>
+      ;(() => {
+        const PAGE_KEY = 'xunrongbao-premium'
+        const TEMPLATE_ID = `${PAGE_KEY}-template`
+        const LATEST_PATH = '/tl/xunrongbao_price_premium/latest'
+        const LIST_PATH = '/tl/xunrongbao_price_premium'
+        const state = {
+          smelters: [],
+          records: [],
+          editingId: null,
+          latestRecord: null,
+        }
+
+        function tokenHeaders() {
+          try {
+            const t = localStorage.getItem('api_token')
+            return t ? { Authorization: `Bearer ${t}` } : {}
+          } catch (_) {
+            return {}
+          }
+        }
+
+        function todayYmd() {
+          const d = new Date()
+          const y = d.getFullYear()
+          const m = String(d.getMonth() + 1).padStart(2, '0')
+          const day = String(d.getDate()).padStart(2, '0')
+          return `${y}-${m}-${day}`
+        }
+
+        function esc(v) {
+          return String(v == null ? '' : v)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+        }
+
+        function pick(obj, keys, fallback) {
+          if (!obj || typeof obj !== 'object') return fallback == null ? '' : fallback
+          for (const k of keys) {
+            if (obj[k] != null && obj[k] !== '') return obj[k]
+          }
+          return fallback == null ? '' : fallback
+        }
+
+        function pickStr(obj, keys, fallback) {
+          const v = pick(obj, keys, fallback)
+          return String(v == null ? '' : v).trim()
+        }
+
+        function pickNum(obj, keys, fallback) {
+          const n = Number(pick(obj, keys, fallback))
+          return Number.isFinite(n) ? n : fallback
+        }
+
+        function displayOperatorName(raw) {
+          const text = String(raw == null ? '' : raw).trim()
+          if (!text) return ''
+          const roleMatch = text.match(/\brole=([^\s()]+)/)
+          if (roleMatch && roleMatch[1]) return roleMatch[1]
+          return text
+        }
+
+        function unwrapPayload(json) {
+          if (!json || typeof json !== 'object') return json
+          return json.data != null ? json.data : json
+        }
+
+        function unwrapList(json) {
+          const data = unwrapPayload(json)
+          if (Array.isArray(data)) return data
+          if (!data || typeof data !== 'object') return []
+          const keys = ['记录列表', '列表', 'list', 'items', 'records', 'rows', 'data']
+          for (const k of keys) {
+            if (Array.isArray(data[k])) return data[k]
+          }
+          return []
+        }
+
+        async function requestJson(path, opts) {
+          const res = await fetch(path, {
+            credentials: 'same-origin',
+            ...(opts || {}),
+            headers: {
+              ...tokenHeaders(),
+              ...((opts && opts.headers) || {}),
+            },
+          })
+          const text = await res.text()
+          let json = null
+          try {
+            json = text ? JSON.parse(text) : null
+          } catch (_) {}
+          if (!res.ok) {
+            const msg =
+              (json && (json.message || json.msg || json.detail)) || text || `HTTP ${res.status}`
+            throw new Error(String(msg))
+          }
+          return json
+        }
+
+        function recordFromRow(row) {
+          return {
+            id: pickNum(row, ['记录id', 'id', 'record_id', 'config_id'], 0),
+            factoryId: pickNum(row, ['冶炼厂id', 'factory_id', 'factoryId', 'smelter_id'], 0),
+            factoryName: pickStr(row, ['冶炼厂', '冶炼厂名', 'factory_name', 'smelter_name'], ''),
+            premium: pickNum(row, ['加价金额', '最新加价元每吨', '加价元每吨', 'premium', 'premium_per_ton'], null),
+            effectiveDate: pickStr(row, ['生效日期', '最新生效日期', 'effective_date', 'date'], ''),
+            remark: pickStr(row, ['备注', 'remark'], ''),
+            operator: displayOperatorName(pickStr(row, ['修改人', '操作人', 'updated_by', '创建人', 'operator', 'created_by'], '')),
+            createdAt: pickStr(row, ['更新时间', 'updated_at', '创建时间', 'created_at', '上传时间'], ''),
+          }
+        }
+
+        function ensureTemplate() {
+          if (document.getElementById(TEMPLATE_ID)) return
+          const tpl = document.createElement('template')
+          tpl.id = TEMPLATE_ID
+          tpl.innerHTML = `
+            <div class="page-content xrb-premium-page">
+              <div class="page-header xrb-page-headline">
+                <div>
+                  <h3>循融宝价格基准维护</h3>
+                  <p>维护金利冶炼厂循融宝加价金额，供智能比价后台按最新生效配置参与计算。</p>
+                </div>
+                <button id="xrb-open-modal-btn" type="button" class="btn btn-primary">维护加价金额</button>
+              </div>
+              <div class="xrb-summary-grid">
+                <div class="xrb-summary-card">
+                  <p class="xrb-summary-label">最新加价幅度</p>
+                  <p class="xrb-summary-value" id="xrb-latest-premium">-</p>
+                  <p class="xrb-summary-note">单位：元/吨</p>
+                </div>
+                <div class="xrb-summary-card">
+                  <p class="xrb-summary-label">每日价格波动</p>
+                  <p class="xrb-summary-value" id="xrb-daily-change">-</p>
+                  <p class="xrb-summary-note">比昨日增减，未变则显示不变</p>
+                </div>
+                <div class="xrb-summary-card">
+                  <p class="xrb-summary-label">最新生效日期</p>
+                  <p class="xrb-summary-value" id="xrb-latest-date">-</p>
+                  <p class="xrb-summary-note" id="xrb-latest-factory">适用冶炼厂：金利</p>
+                </div>
+              </div>
+              <div class="card" style="margin-bottom:14px;">
+                <div class="card-header"><h4 style="margin:0;">历史价格记录</h4></div>
+                <div class="card-body">
+                  <div class="xrb-filter-grid" style="margin-bottom:10px;">
+                    <div class="form-group xrb-col-3">
+                      <label for="xrb-filter-factory">冶炼厂</label>
+                      <select id="xrb-filter-factory" class="form-control"></select>
+                    </div>
+                    <div class="form-group xrb-col-2">
+                      <label for="xrb-date-from">开始日期</label>
+                      <input id="xrb-date-from" type="date" class="form-control">
+                    </div>
+                    <div class="form-group xrb-col-2">
+                      <label for="xrb-date-to">结束日期</label>
+                      <input id="xrb-date-to" type="date" class="form-control">
+                    </div>
+                    <div class="xrb-col-3 xrb-actions">
+                      <button id="xrb-query-btn" type="button" class="btn btn-outline-primary">查询</button>
+                      <button id="xrb-refresh-btn" type="button" class="btn btn-outline-secondary">刷新</button>
+                    </div>
+                  </div>
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead><tr><th>冶炼厂</th><th>加价金额</th><th>生效日期</th><th>较上一日</th><th>备注</th><th>操作人</th><th>记录时间</th></tr></thead>
+                      <tbody id="xrb-records-body"><tr><td colspan="7">加载中...</td></tr></tbody>
+                    </table>
+                  </div>
+                  <p id="xrb-list-err" class="xrb-err"></p>
+                </div>
+              </div>
+              <div id="xrb-premium-modal" class="xrb-premium-modal" role="dialog" aria-modal="true" aria-labelledby="xrb-modal-title">
+                <div class="xrb-modal-card">
+                  <div class="xrb-modal-head">
+                    <h4 id="xrb-modal-title" class="xrb-modal-title">维护循融宝加价金额</h4>
+                    <button id="xrb-modal-close-btn" type="button" class="btn btn-sm btn-outline-secondary">关闭</button>
+                  </div>
+                  <div class="xrb-modal-body">
+                    <div class="xrb-form-grid">
+                      <div class="form-group xrb-col-6">
+                        <label for="xrb-factory-select">冶炼厂</label>
+                        <select id="xrb-factory-select" class="form-control"></select>
+                      </div>
+                      <div class="form-group xrb-col-6">
+                        <label for="xrb-date-input">生效日期</label>
+                        <input id="xrb-date-input" type="date" class="form-control">
+                      </div>
+                      <div class="form-group xrb-col-6">
+                        <label for="xrb-premium-input">加价金额</label>
+                        <input id="xrb-premium-input" type="number" min="0" step="0.01" class="form-control" placeholder="元/吨">
+                      </div>
+                      <div class="form-group xrb-col-6">
+                        <label for="xrb-remark-input">备注</label>
+                        <input id="xrb-remark-input" type="text" maxlength="120" class="form-control" placeholder="调价原因，可选">
+                      </div>
+                    </div>
+                    <p id="xrb-form-msg" class="xrb-msg"></p>
+                    <p id="xrb-form-err" class="xrb-err"></p>
+                    <div class="xrb-actions" style="margin-top:12px;">
+                      <button id="xrb-reset-btn" type="button" class="btn btn-outline-secondary">清空</button>
+                      <button id="xrb-save-btn" type="button" class="btn btn-primary">保存配置</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `
+          document.body.appendChild(tpl)
+        }
+
+        function getUi() {
+          return {
+            latestPremium: document.getElementById('xrb-latest-premium'),
+            dailyChange: document.getElementById('xrb-daily-change'),
+            latestDate: document.getElementById('xrb-latest-date'),
+            latestFactory: document.getElementById('xrb-latest-factory'),
+            openModalBtn: document.getElementById('xrb-open-modal-btn'),
+            modal: document.getElementById('xrb-premium-modal'),
+            modalCloseBtn: document.getElementById('xrb-modal-close-btn'),
+            factorySelect: document.getElementById('xrb-factory-select'),
+            filterFactory: document.getElementById('xrb-filter-factory'),
+            premiumInput: document.getElementById('xrb-premium-input'),
+            dateInput: document.getElementById('xrb-date-input'),
+            remarkInput: document.getElementById('xrb-remark-input'),
+            saveBtn: document.getElementById('xrb-save-btn'),
+            resetBtn: document.getElementById('xrb-reset-btn'),
+            msg: document.getElementById('xrb-form-msg'),
+            err: document.getElementById('xrb-form-err'),
+            dateFrom: document.getElementById('xrb-date-from'),
+            dateTo: document.getElementById('xrb-date-to'),
+            queryBtn: document.getElementById('xrb-query-btn'),
+            refreshBtn: document.getElementById('xrb-refresh-btn'),
+            recordsBody: document.getElementById('xrb-records-body'),
+            listErr: document.getElementById('xrb-list-err'),
+          }
+        }
+
+        function selectedFactoryId(ui) {
+          const id = Number(ui.filterFactory?.value || ui.factorySelect?.value || '')
+          return Number.isFinite(id) && id > 0 ? id : null
+        }
+
+        function smelterId(row) {
+          return pickNum(row, ['冶炼厂id', 'smelter_id', 'factory_id', 'id'], 0)
+        }
+
+        function smelterName(row) {
+          return pickStr(row, ['冶炼厂', '冶炼厂名', 'factory_name', 'name', 'smelter_name'], '')
+        }
+
+        function findDefaultSmelterId() {
+          const jinli = state.smelters.find((s) => /金利/.test(s.name))
+          return jinli?.id || state.smelters[0]?.id || 0
+        }
+
+        function fillFactorySelect(sel, includeAll) {
+          if (!sel) return
+          const current = sel.value
+          const opts = []
+          if (includeAll) opts.push('<option value="">全部冶炼厂</option>')
+          for (const sm of state.smelters) {
+            opts.push(`<option value="${esc(sm.id)}">${esc(sm.name || `冶炼厂 ${sm.id}`)}</option>`)
+          }
+          sel.innerHTML = opts.join('') || '<option value="">暂无冶炼厂</option>'
+          if (current && Array.from(sel.options).some((o) => o.value === current)) {
+            sel.value = current
+          } else if (!includeAll) {
+            const def = findDefaultSmelterId()
+            if (def) sel.value = String(def)
+          }
+        }
+
+        async function loadSmelters() {
+          const json = await requestJson('/tl/get_smelters?include_inactive=true')
+          state.smelters = unwrapList(json)
+            .map((row) => ({ id: smelterId(row), name: smelterName(row) }))
+            .filter((x) => x.id > 0 && x.name)
+        }
+
+        async function loadLatest() {
+          const ui = getUi()
+          const factoryId = Number(ui.factorySelect?.value || findDefaultSmelterId() || '')
+          const q = new URLSearchParams()
+          if (factoryId) q.set('factory_id', String(factoryId))
+          const json = await requestJson(`${LATEST_PATH}${q.toString() ? `?${q}` : ''}`)
+          const data = unwrapPayload(json) || {}
+          const row = recordFromRow(data)
+          const hasPremium = row.premium != null && Number.isFinite(Number(row.premium))
+          if (ui.latestPremium) ui.latestPremium.textContent = hasPremium ? String(row.premium) : '-'
+          if (ui.latestDate) ui.latestDate.textContent = row.effectiveDate || '-'
+          const name = row.factoryName || state.smelters.find((s) => s.id === factoryId)?.name || '金利'
+          if (ui.latestFactory) ui.latestFactory.textContent = `适用冶炼厂：${name}`
+          state.latestRecord = hasPremium ? row : null
+          updateDailyChange()
+        }
+
+        async function loadRecords() {
+          const ui = getUi()
+          if (ui.listErr) ui.listErr.textContent = ''
+          if (ui.recordsBody) ui.recordsBody.innerHTML = '<tr><td colspan="7">加载中...</td></tr>'
+          const q = new URLSearchParams()
+          const fid = selectedFactoryId(ui)
+          if (fid) q.set('factory_id', String(fid))
+          if (ui.dateFrom?.value) q.set('date_from', ui.dateFrom.value)
+          if (ui.dateTo?.value) q.set('date_to', ui.dateTo.value)
+          try {
+            const json = await requestJson(`${LIST_PATH}${q.toString() ? `?${q}` : ''}`)
+            state.records = unwrapList(json).map(recordFromRow)
+            renderRecords()
+            updateDailyChange()
+          } catch (e) {
+            if (ui.recordsBody) ui.recordsBody.innerHTML = '<tr><td colspan="7">加载失败</td></tr>'
+            if (ui.listErr) ui.listErr.textContent = e instanceof Error ? e.message : String(e)
+          }
+        }
+
+        function sortedRecords() {
+          return [...state.records].sort((a, b) => String(b.effectiveDate || '').localeCompare(String(a.effectiveDate || '')))
+        }
+
+        function formatChange(cur, prev) {
+          const c = Number(cur)
+          const p = Number(prev)
+          if (!Number.isFinite(c) || !Number.isFinite(p)) return { text: '-', cls: 'xrb-change-flat' }
+          const diff = Math.round((c - p) * 100) / 100
+          if (diff > 0) return { text: `+${diff}`, cls: 'xrb-change-up' }
+          if (diff < 0) return { text: String(diff), cls: 'xrb-change-down' }
+          return { text: '不变', cls: 'xrb-change-flat' }
+        }
+
+        function updateDailyChange() {
+          const ui = getUi()
+          if (!ui.dailyChange) return
+          const rows = sortedRecords().filter((r) => r.premium != null && r.effectiveDate)
+          const latest = state.latestRecord || rows[0]
+          const prev = rows.find((r) => latest && r.effectiveDate < latest.effectiveDate)
+          const change = latest && prev ? formatChange(latest.premium, prev.premium) : { text: '-', cls: 'xrb-change-flat' }
+          ui.dailyChange.textContent = change.text
+          ui.dailyChange.className = `xrb-summary-value ${change.cls}`
+        }
+
+        function renderRecords() {
+          const ui = getUi()
+          if (!ui.recordsBody) return
+          if (!state.records.length) {
+            ui.recordsBody.innerHTML = '<tr><td colspan="7">暂无历史价格记录</td></tr>'
+            return
+          }
+          ui.recordsBody.innerHTML = sortedRecords()
+            .map((r, idx, arr) => {
+              const factoryName = r.factoryName || state.smelters.find((s) => s.id === r.factoryId)?.name || '-'
+              const prev = arr[idx + 1]
+              const change = prev ? formatChange(r.premium, prev.premium) : { text: '-', cls: 'xrb-change-flat' }
+              return `<tr data-id="${esc(r.id)}">
+                <td>${esc(factoryName)}</td>
+                <td><span class="xrb-chip">${esc(r.premium)} 元/吨</span></td>
+                <td>${esc(r.effectiveDate || '-')}</td>
+                <td class="${esc(change.cls)}">${esc(change.text)}</td>
+                <td>${esc(r.remark || '-')}</td>
+                <td>${esc(r.operator || '-')}</td>
+                <td>${esc(r.createdAt || '-')}</td>
+              </tr>`
+            })
+            .join('')
+        }
+
+        function resetForm() {
+          const ui = getUi()
+          state.editingId = null
+          if (ui.premiumInput) ui.premiumInput.value = ''
+          if (ui.dateInput) ui.dateInput.value = todayYmd()
+          if (ui.remarkInput) ui.remarkInput.value = ''
+          if (ui.saveBtn) ui.saveBtn.textContent = '保存配置'
+          if (ui.msg) ui.msg.textContent = ''
+          if (ui.err) ui.err.textContent = ''
+        }
+
+        function openPremiumModal() {
+          const ui = getUi()
+          const latest = state.latestRecord || sortedRecords()[0]
+          const fallbackFactoryId = Number(ui.filterFactory?.value || findDefaultSmelterId() || '')
+          if (ui.factorySelect) ui.factorySelect.value = String(latest?.factoryId || fallbackFactoryId || '')
+          if (ui.premiumInput) ui.premiumInput.value = latest?.premium != null ? String(latest.premium) : ''
+          if (ui.dateInput) ui.dateInput.value = todayYmd()
+          if (ui.remarkInput) ui.remarkInput.value = ''
+          if (ui.saveBtn) ui.saveBtn.textContent = '保存配置'
+          if (ui.msg) ui.msg.textContent = ''
+          if (ui.err) ui.err.textContent = ''
+          if (ui.modal) ui.modal.classList.add('is-open')
+        }
+
+        function closePremiumModal() {
+          const ui = getUi()
+          if (ui.modal) ui.modal.classList.remove('is-open')
+        }
+
+        async function saveRecord() {
+          const ui = getUi()
+          if (ui.msg) ui.msg.textContent = ''
+          if (ui.err) ui.err.textContent = ''
+          const factoryId = Number(ui.factorySelect?.value || '')
+          const premiumRaw = String(ui.premiumInput?.value || '').trim()
+          const premium = Number(premiumRaw)
+          const date = String(ui.dateInput?.value || '').trim()
+          const remark = String(ui.remarkInput?.value || '').trim()
+          if (!Number.isFinite(factoryId) || factoryId <= 0) {
+            if (ui.err) ui.err.textContent = '请选择冶炼厂。'
+            return
+          }
+          if (!premiumRaw || !Number.isFinite(premium) || premium < 0) {
+            if (ui.err) ui.err.textContent = '请输入不小于 0 的加价金额。'
+            return
+          }
+          if (!date) {
+            if (ui.err) ui.err.textContent = '请选择生效日期。'
+            return
+          }
+          if (ui.saveBtn) {
+            ui.saveBtn.disabled = true
+            ui.saveBtn.textContent = '保存中...'
+          }
+          try {
+            await requestJson(LIST_PATH, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                冶炼厂id: factoryId,
+                加价金额: premium,
+                生效日期: date,
+                备注: remark,
+              }),
+            })
+            if (ui.msg) ui.msg.textContent = '配置已保存，智能比价将按后端最新生效值参与计算。'
+            resetForm()
+            if (ui.factorySelect) ui.factorySelect.value = String(factoryId)
+            if (ui.filterFactory) ui.filterFactory.value = String(factoryId)
+            await Promise.all([loadLatest(), loadRecords()])
+            closePremiumModal()
+          } catch (e) {
+            if (ui.err) ui.err.textContent = e instanceof Error ? e.message : String(e)
+          } finally {
+            if (ui.saveBtn) {
+              ui.saveBtn.disabled = false
+              ui.saveBtn.textContent = state.editingId ? '保存修改' : '保存配置'
+            }
+          }
+        }
+
+        function bindPageOnce() {
+          const page = document.querySelector('.xrb-premium-page')
+          if (!page || page.dataset.bound === '1') return false
+          page.dataset.bound = '1'
+          const ui = getUi()
+          if (ui.openModalBtn) ui.openModalBtn.addEventListener('click', openPremiumModal)
+          if (ui.modalCloseBtn) ui.modalCloseBtn.addEventListener('click', closePremiumModal)
+          if (ui.modal) {
+            ui.modal.addEventListener('click', (evt) => {
+              if (evt.target === ui.modal) closePremiumModal()
+            })
+          }
+          if (ui.saveBtn) ui.saveBtn.addEventListener('click', () => void saveRecord())
+          if (ui.resetBtn) ui.resetBtn.addEventListener('click', resetForm)
+          if (ui.queryBtn) ui.queryBtn.addEventListener('click', () => void loadRecords())
+          if (ui.refreshBtn) ui.refreshBtn.addEventListener('click', () => void Promise.all([loadLatest(), loadRecords()]))
+          if (ui.filterFactory) {
+            ui.filterFactory.addEventListener('change', () => {
+              if (ui.factorySelect) ui.factorySelect.value = ui.filterFactory.value
+              void Promise.all([loadLatest(), loadRecords()])
+            })
+          }
+          if (ui.factorySelect) ui.factorySelect.addEventListener('change', () => void loadLatest())
+          return true
+        }
+
+        async function mountPage() {
+          const ui = getUi()
+          if (!ui.factorySelect || !ui.filterFactory) return false
+          try {
+            await loadSmelters()
+            fillFactorySelect(ui.factorySelect, false)
+            fillFactorySelect(ui.filterFactory, true)
+            const def = findDefaultSmelterId()
+            if (def) ui.filterFactory.value = String(def)
+            resetForm()
+            bindPageOnce()
+            await Promise.all([loadLatest(), loadRecords()])
+          } catch (e) {
+            if (ui.err) ui.err.textContent = e instanceof Error ? e.message : String(e)
+            if (ui.recordsBody) ui.recordsBody.innerHTML = '<tr><td colspan="7">页面初始化失败</td></tr>'
+          }
+          return true
+        }
+
+        function ensureModuleCard() {
+          const cards = Array.from(document.querySelectorAll('.home-page .module-cards'))
+          if (!cards.length) return
+          const backendCards = cards[0]
+          if (!backendCards || backendCards.querySelector(`.module-card[data-page="${PAGE_KEY}"]`)) return
+          const card = document.createElement('div')
+          card.className = 'module-card module-card--xrb-premium'
+          card.setAttribute('data-page', PAGE_KEY)
+          card.innerHTML = `
+            <div class="module-icon"><i class="fas fa-scale-balanced"></i></div>
+            <div class="module-info">
+              <h4>循融宝价格基准</h4>
+              <p>维护金利冶炼厂循融宝加价金额</p>
+            </div>
+          `
+          backendCards.appendChild(card)
+        }
+
+        function bindLifecycle() {
+          document.addEventListener('click', (evt) => {
+            const card = evt.target.closest(`.module-card[data-page="${PAGE_KEY}"]`)
+            if (!card) return
+            setTimeout(() => void mountPage(), 0)
+          })
+        }
+
+        function start() {
+          ensureTemplate()
+          bindLifecycle()
+          ensureModuleCard()
+          const mo = new MutationObserver(() => ensureModuleCard())
+          mo.observe(document.body, { childList: true, subtree: true })
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', start)
+        } else {
+          start()
+        }
+      })()
+    </script>
+    <style>
       .excel-import-card {
         border: 1px solid #d8e2ef;
         border-radius: 12px;
