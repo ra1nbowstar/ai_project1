@@ -9,10 +9,11 @@ export type RuleCheckFindingStatus = 'ok' | 'warn' | 'bad'
 
 export type RuleCheckUserFinding = {
   status: RuleCheckFindingStatus
-  /** 后端 title / label / name，无则留空 */
   title: string
+  resultLabel: string
+  resultText: string
   text: string
-  /** 详细信息列表 */
+  explanation: string
   details?: { label: string; value: string }[]
 }
 
@@ -26,6 +27,11 @@ export type RuleCheckUserView = {
   findings: RuleCheckUserFinding[]
   timeFacts: RuleCheckTimeFact[]
 }
+
+type RuleBlock =
+  | (RuleChecksPixelOverlap & Record<string, unknown>)
+  | (RuleChecksTimestamp & Record<string, unknown>)
+  | (RuleChecksSemantic & Record<string, unknown>)
 
 function joinUnique(parts: string[]): string {
   const seen = new Set<string>()
@@ -76,6 +82,141 @@ function readBlockStatus(
   return 'ok'
 }
 
+function resultLabel(status: RuleCheckFindingStatus): string {
+  if (status === 'ok') return '结果正常'
+  if (status === 'warn') return '需要复核'
+  return '发现问题'
+}
+
+function defaultResultText(title: string, status: RuleCheckFindingStatus): string {
+  if (title === '拼接/贴图痕迹') {
+    if (status === 'ok') return '未发现明显拼接、贴图或重复粘贴痕迹。'
+    if (status === 'warn') return '检测到疑似拼接或贴图迹象，建议人工放大查看。'
+    return '检测到明显拼接、贴图或重复粘贴痕迹，这张图存在问题。'
+  }
+  if (title === '时间与单据核对') {
+    if (status === 'ok') return '图片中的时间信息和交易/单据信息基本一致。'
+    if (status === 'warn') return '时间信息存在疑点，建议核对交易截图和单据原件。'
+    return '图片时间和交易或单据信息不一致，这张图存在问题。'
+  }
+  if (title === '金额、排版与图片信息') {
+    if (status === 'ok') return '金额、排版和图片信息没有发现明显异常。'
+    if (status === 'warn') return '金额、排版或图片信息有可疑点，建议人工复核。'
+    return '金额、排版或图片信息存在明显异常，这张图存在问题。'
+  }
+  if (status === 'ok') return '该规则未发现明显异常。'
+  if (status === 'warn') return '该规则发现可疑点，建议人工复核。'
+  return '该规则发现明显问题。'
+}
+
+function readableMessage(title: string, status: RuleCheckFindingStatus, rawText: string): string {
+  const raw = rawText.trim()
+  if (!raw || raw === '—') return defaultResultText(title, status)
+
+  const lower = raw.toLowerCase()
+  if (lower.includes('status_transaction_time_mismatch')) {
+    return '图片状态栏时间和交易时间对不上，可能不是同一次截图或图片被处理过。'
+  }
+  if (lower.includes('business') && lower.includes('mismatch')) {
+    return '交易时间和业务单据时间对不上，需要核对原始单据。'
+  }
+  if (lower.includes('pixel') || lower.includes('overlap') || lower.includes('splice')) {
+    return status === 'ok'
+      ? '没有看到明显复制粘贴或拼接痕迹。'
+      : '系统在局部区域看到了类似复制粘贴、拼接或重复覆盖的痕迹。'
+  }
+  if (lower.includes('exif')) {
+    return status === 'ok'
+      ? '图片保存信息未发现明显异常。'
+      : '图片保存信息缺失或不一致，不能单独证明有问题，但需要结合图片内容复核。'
+  }
+
+  if (status === 'ok') return defaultResultText(title, status)
+  return `${defaultResultText(title, status)}系统原始提示：${raw}`
+}
+
+function explanationFor(title: string): string {
+  if (title === '拼接/贴图痕迹') {
+    return '这一项会看图片里有没有复制粘贴、局部覆盖、边缘不自然、噪点不一致等痕迹。简单说，就是判断图片有没有被局部改过。'
+  }
+  if (title === '时间与单据核对') {
+    return '这一项会对比图片状态栏时间、交易时间、单据时间和图片保存信息。只要这些时间互相对不上，就需要人工复核。'
+  }
+  if (title === '金额、排版与图片信息') {
+    return '这一项会看金额、文字排版、脱敏区域和图片保存信息是否符合常见截图规律。它主要帮助发现内容被改写或拼接的风险。'
+  }
+  return '这一项是辅助规则，只用于提示风险，最终仍建议结合原图和业务记录人工确认。'
+}
+
+function pushPercentDetail(details: { label: string; value: string }[], label: string, value: unknown) {
+  const n = Number(value)
+  if (Number.isFinite(n)) details.push({ label, value: `${(n * 100).toFixed(1)}%` })
+}
+
+function buildPixelDetails(block: RuleChecksPixelOverlap & Record<string, unknown>) {
+  const details: { label: string; value: string }[] = []
+  pushPercentDetail(details, '像素重叠分数', block.pixel_overlap_score)
+  if (block.overlap_metrics && typeof block.overlap_metrics === 'object') {
+    const metrics = block.overlap_metrics as Record<string, unknown>
+    pushPercentDetail(details, '结构相似度', metrics.structural_score)
+    pushPercentDetail(details, '颜色混合痕迹', metrics.blend_score)
+    pushPercentDetail(details, '重复边缘比例', metrics.double_edge_ratio)
+    pushPercentDetail(details, '异常渐变比例', metrics.long_gradient_ratio)
+    pushPercentDetail(details, '压缩痕迹差异', metrics.ela_score)
+    pushPercentDetail(details, '噪点不一致程度', metrics.noise_inconsistency_score)
+    pushPercentDetail(details, '文字拼接痕迹', metrics.text_splice_score)
+  }
+  if (Array.isArray(block.auto_scan_regions) && block.auto_scan_regions.length > 0) {
+    details.push({ label: '扫描区域数', value: String(block.auto_scan_regions.length) })
+  }
+  return details
+}
+
+function buildTimestampDetails(block: RuleChecksTimestamp & Record<string, unknown>) {
+  const details: { label: string; value: string }[] = []
+  pushPercentDetail(details, '风险程度', block.risk)
+  if (block.transaction_time) details.push({ label: '交易时间', value: String(block.transaction_time) })
+  if (block.business_mismatch === true) details.push({ label: '时间是否不一致', value: '是' })
+  if (block.timestamp_check && typeof block.timestamp_check === 'object') {
+    const tc = block.timestamp_check as Record<string, unknown>
+    if (typeof tc.status_bar_time === 'string' && tc.status_bar_time.trim()) {
+      details.push({ label: '状态栏时间', value: tc.status_bar_time.trim() })
+    }
+    if (typeof tc.business_document_time === 'string' && tc.business_document_time.trim()) {
+      details.push({ label: '业务单据时间', value: tc.business_document_time.trim() })
+    }
+    if (tc.has_exif === false) details.push({ label: '图片保存信息', value: '无' })
+  }
+  return details
+}
+
+function buildSemanticDetails(block: RuleChecksSemantic & Record<string, unknown>) {
+  const details: { label: string; value: string }[] = []
+  pushPercentDetail(details, '风险程度', block.risk)
+  if (Array.isArray(block.anomalies) && block.anomalies.length > 0) {
+    details.push({ label: '异常类型', value: block.anomalies.map(String).join('、') })
+  }
+  return details
+}
+
+function buildFinding(
+  title: string,
+  block: RuleBlock,
+  details: { label: string; value: string }[],
+): RuleCheckUserFinding {
+  const status = readBlockStatus(block)
+  const rawText = readBlockText(block)
+  return {
+    status,
+    title,
+    resultLabel: resultLabel(status),
+    resultText: defaultResultText(title, status),
+    text: readableMessage(title, status, rawText),
+    explanation: explanationFor(title),
+    details: details.length > 0 ? details : undefined,
+  }
+}
+
 export function makeFinding(
   block:
     | (RuleChecksPixelOverlap & Record<string, unknown>)
@@ -86,96 +227,9 @@ export function makeFinding(
 ): RuleCheckUserFinding | null {
   if (!block) return null
   const text = readBlockText(block)
-  if (!text && block.passed == null && block.hard_tamper == null && block.alert == null) {
-    return null
-  }
-
-  const details: { label: string; value: string }[] = []
-
-  // 提取 pixel_overlap 的详细信息
-  if ('pixel_overlap_score' in block && block.pixel_overlap_score != null) {
-    const score = Number(block.pixel_overlap_score)
-    if (Number.isFinite(score)) {
-      details.push({ label: '像素重叠分数', value: `${(score * 100).toFixed(1)}%` })
-    }
-  }
-  if ('overlap_metrics' in block && block.overlap_metrics && typeof block.overlap_metrics === 'object') {
-    const metrics = block.overlap_metrics as Record<string, unknown>
-    if (metrics.structural_score != null) {
-      details.push({ label: '结构分数', value: `${(Number(metrics.structural_score) * 100).toFixed(1)}%` })
-    }
-    if (metrics.blend_score != null) {
-      details.push({ label: '混合分数', value: `${(Number(metrics.blend_score) * 100).toFixed(1)}%` })
-    }
-    if (metrics.double_edge_ratio != null) {
-      details.push({ label: '双边缘比例', value: `${(Number(metrics.double_edge_ratio) * 100).toFixed(1)}%` })
-    }
-    if (metrics.long_gradient_ratio != null) {
-      details.push({ label: '长渐变比例', value: `${(Number(metrics.long_gradient_ratio) * 100).toFixed(1)}%` })
-    }
-    if (metrics.ela_score != null) {
-      details.push({ label: 'ELA 分数', value: `${(Number(metrics.ela_score) * 100).toFixed(1)}%` })
-    }
-    if (metrics.noise_inconsistency_score != null) {
-      details.push({ label: '噪声不一致分数', value: `${(Number(metrics.noise_inconsistency_score) * 100).toFixed(1)}%` })
-    }
-    if (metrics.text_splice_score != null) {
-      details.push({ label: '文本拼接分数', value: `${(Number(metrics.text_splice_score) * 100).toFixed(1)}%` })
-    }
-  }
-  if ('auto_scan_regions' in block && Array.isArray(block.auto_scan_regions) && block.auto_scan_regions.length > 0) {
-    details.push({ label: '自动扫描区域数', value: String(block.auto_scan_regions.length) })
-  }
-
-  // 提取 semantic 的详细信息
-  if ('risk' in block && block.risk != null && typeof block.risk === 'number') {
-    details.push({ label: '风险分数', value: `${(block.risk * 100).toFixed(1)}%` })
-  }
-  if ('semantic_check' in block && block.semantic_check && typeof block.semantic_check === 'object') {
-    const sc = block.semantic_check as Record<string, unknown>
-    if (sc.account_masks && typeof sc.account_masks === 'object') {
-      const am = sc.account_masks as Record<string, unknown>
-      if (am.anomaly === true) {
-        details.push({ label: '账号脱敏', value: '异常' })
-      }
-      if (typeof am.message === 'string' && am.message.trim()) {
-        details.push({ label: '账号脱敏说明', value: am.message.trim() })
-      }
-    }
-    if (sc.synthetic && typeof sc.synthetic === 'object') {
-      const sy = sc.synthetic as Record<string, unknown>
-      if (sy.suspicious === true) {
-        details.push({ label: '合成检测', value: '可疑' })
-      }
-      if (Array.isArray(sy.signals) && sy.signals.length > 0) {
-        details.push({ label: '合成信号', value: sy.signals.map(String).join('、') })
-      }
-    }
-  }
-
-  // 提取 timestamp 的详细信息
-  if ('timestamp_check' in block && block.timestamp_check && typeof block.timestamp_check === 'object') {
-    const tc = block.timestamp_check as Record<string, unknown>
-    if (typeof tc.transaction_time === 'string' && tc.transaction_time.trim()) {
-      details.push({ label: '交易时间', value: tc.transaction_time.trim() })
-    }
-    if (typeof tc.business_document_time === 'string' && tc.business_document_time.trim()) {
-      details.push({ label: '业务单据时间', value: tc.business_document_time.trim() })
-    }
-    if (tc.has_exif === false) {
-      details.push({ label: 'EXIF 信息', value: '无' })
-    }
-  }
-  if ('business_mismatch' in block && block.business_mismatch === true) {
-    details.push({ label: '业务时间不匹配', value: '是' })
-  }
-
-  return {
-    status: readBlockStatus(block),
-    title: readBlockLabel(block),
-    text: text || '—',
-    details: details.length > 0 ? details : undefined,
-  }
+  if (!text && block.passed == null && block.hard_tamper == null && block.alert == null) return null
+  const title = readBlockLabel(block) || '规则检测项'
+  return buildFinding(title, block, [])
 }
 
 export function ruleCheckVerdict(data: RuleChecksData | null | undefined): {
@@ -186,7 +240,29 @@ export function ruleCheckVerdict(data: RuleChecksData | null | undefined): {
   if (data.available === false) return { label: '暂无', pillClass: '' }
   const st = data.status?.trim()
   if (st) return { label: st, pillClass: st }
+  const blocks = [data.pixel_overlap, data.timestamp, data.semantic].filter(Boolean) as RuleBlock[]
+  if (blocks.some((block) => readBlockStatus(block) === 'bad')) return { label: '有问题', pillClass: '篡改' }
+  if (blocks.some((block) => readBlockStatus(block) === 'warn')) return { label: '需复核', pillClass: '可疑' }
+  if (blocks.length > 0) return { label: '正常', pillClass: '正常' }
   return { label: '—', pillClass: '' }
+}
+
+function buildSummary(data: RuleChecksData, findings: RuleCheckUserFinding[]): string {
+  if (data.reason?.trim()) {
+    const bad = findings.filter((item) => item.status === 'bad').map((item) => item.title)
+    const warn = findings.filter((item) => item.status === 'warn').map((item) => item.title)
+    if (bad.length > 0) return `规则检测结论：这张图片存在问题，主要风险在${bad.join('、')}。`
+    if (warn.length > 0) return `规则检测结论：这张图片有可疑点，建议重点复核${warn.join('、')}。`
+    return '规则检测结论：未发现明显问题，图片通过规则审核。'
+  }
+  if (findings.length === 0) return '规则检测结论：暂无可展示的规则检测数据。'
+  if (findings.some((item) => item.status === 'bad')) {
+    return `规则检测结论：这张图片存在问题，主要风险在${findings.filter((item) => item.status === 'bad').map((item) => item.title).join('、')}。`
+  }
+  if (findings.some((item) => item.status === 'warn')) {
+    return `规则检测结论：这张图片有可疑点，建议重点复核${findings.filter((item) => item.status === 'warn').map((item) => item.title).join('、')}。`
+  }
+  return '规则检测结论：未发现明显问题，图片通过规则审核。'
 }
 
 export function buildRuleCheckUserView(
@@ -203,113 +279,23 @@ export function buildRuleCheckUserView(
 
   const findings: RuleCheckUserFinding[] = []
 
-  // 像素重叠检测
   if (data.pixel_overlap) {
     const block = data.pixel_overlap as RuleChecksPixelOverlap & Record<string, unknown>
-    const text = block.message || readBlockText(block) || '暂无该项检测数据'
-    const details: { label: string; value: string }[] = []
-
-    // 提取详细指标
-    if (block.pixel_overlap_score != null) {
-      const score = Number(block.pixel_overlap_score)
-      if (Number.isFinite(score)) {
-        details.push({ label: '像素重叠分数', value: `${(score * 100).toFixed(1)}%` })
-      }
-    }
-    if (block.overlap_metrics && typeof block.overlap_metrics === 'object') {
-      const metrics = block.overlap_metrics as Record<string, unknown>
-      if (metrics.structural_score != null) {
-        details.push({ label: '结构分数', value: `${(Number(metrics.structural_score) * 100).toFixed(1)}%` })
-      }
-      if (metrics.blend_score != null) {
-        details.push({ label: '混合分数', value: `${(Number(metrics.blend_score) * 100).toFixed(1)}%` })
-      }
-      if (metrics.double_edge_ratio != null) {
-        details.push({ label: '双边缘比例', value: `${(Number(metrics.double_edge_ratio) * 100).toFixed(1)}%` })
-      }
-      if (metrics.long_gradient_ratio != null) {
-        details.push({ label: '长渐变比例', value: `${(Number(metrics.long_gradient_ratio) * 100).toFixed(1)}%` })
-      }
-      if (metrics.ela_score != null) {
-        details.push({ label: 'ELA 分数', value: `${(Number(metrics.ela_score) * 100).toFixed(1)}%` })
-      }
-      if (metrics.noise_inconsistency_score != null) {
-        details.push({ label: '噪声不一致分数', value: `${(Number(metrics.noise_inconsistency_score) * 100).toFixed(1)}%` })
-      }
-      if (metrics.text_splice_score != null) {
-        details.push({ label: '文本拼接分数', value: `${(Number(metrics.text_splice_score) * 100).toFixed(1)}%` })
-      }
-    }
-    if (Array.isArray(block.auto_scan_regions) && block.auto_scan_regions.length > 0) {
-      details.push({ label: '自动扫描区域数', value: String(block.auto_scan_regions.length) })
-    }
-
-    findings.push({
-      status: readBlockStatus(block),
-      title: '拼接/贴图痕迹',
-      text,
-      details: details.length > 0 ? details : undefined,
-    })
+    findings.push(buildFinding('拼接/贴图痕迹', block, buildPixelDetails(block)))
   }
 
-  // 时间戳检测
   if (data.timestamp) {
     const block = data.timestamp as RuleChecksTimestamp & Record<string, unknown>
-    const text = block.message || readBlockText(block) || '暂无该项检测数据'
-    const details: { label: string; value: string }[] = []
-
-    // 提取详细信息
-    if (block.risk != null && typeof block.risk === 'number') {
-      details.push({ label: '风险分数', value: `${(block.risk * 100).toFixed(1)}%` })
-    }
-    if (block.transaction_time) {
-      details.push({ label: '交易时间', value: block.transaction_time })
-    }
-    if (block.business_mismatch === true) {
-      details.push({ label: '业务时间不匹配', value: '是' })
-    }
-    if (block.timestamp_check && typeof block.timestamp_check === 'object') {
-      const tc = block.timestamp_check as Record<string, unknown>
-      if (typeof tc.business_document_time === 'string' && tc.business_document_time.trim()) {
-        details.push({ label: '业务单据时间', value: tc.business_document_time.trim() })
-      }
-      if (tc.has_exif === false) {
-        details.push({ label: 'EXIF 信息', value: '无' })
-      }
-    }
-
-    findings.push({
-      status: readBlockStatus(block),
-      title: '时间与单据核对',
-      text,
-      details: details.length > 0 ? details : undefined,
-    })
+    findings.push(buildFinding('时间与单据核对', block, buildTimestampDetails(block)))
   }
 
-  // 语义检测
   if (data.semantic) {
     const block = data.semantic as RuleChecksSemantic & Record<string, unknown>
-    const text = block.message || readBlockText(block) || '暂无该项检测数据'
-    const details: { label: string; value: string }[] = []
-
-    // 提取详细信息
-    if (block.risk != null && typeof block.risk === 'number') {
-      details.push({ label: '风险分数', value: `${(block.risk * 100).toFixed(1)}%` })
-    }
-    if (Array.isArray(block.anomalies) && block.anomalies.length > 0) {
-      details.push({ label: '异常类型', value: block.anomalies.join('、') })
-    }
-
-    findings.push({
-      status: readBlockStatus(block),
-      title: '语义（金额/排版/EXIF）',
-      text,
-      details: details.length > 0 ? details : undefined,
-    })
+    findings.push(buildFinding('金额、排版与图片信息', block, buildSemanticDetails(block)))
   }
 
   return {
-    summary: data.reason?.trim() || '—',
+    summary: buildSummary(data, findings),
     findings,
     timeFacts: [],
   }

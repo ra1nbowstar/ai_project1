@@ -192,6 +192,54 @@ export async function fetchTlSmelters(): Promise<Record<string, unknown>[]> {
   return unwrapList(raw)
 }
 
+export interface TriggerDailyAiPredictionResult {
+  taskId: string
+  batchId: string
+  status: string
+  message: string
+}
+
+export interface DailyAiPredictionStatusResult {
+  batchId: string
+  status: string
+  resultCount: number
+  errorMessage: string | null
+  createdAt: string
+  completedAt: string | null
+}
+
+function asRecord(data: unknown): Record<string, unknown> {
+  return data != null && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {}
+}
+
+export async function triggerDailyAiPrediction(): Promise<TriggerDailyAiPredictionResult> {
+  const raw = await tlPostJson('/tl/trigger_daily_ai_prediction', {})
+  assertTlBizCode200(raw, '启动今日AI预测')
+  const data = asRecord(unwrapData(raw))
+  const batchId = String(data.batch_id ?? '')
+  if (!batchId) throw new Error('启动今日AI预测失败：后端未返回 batch_id')
+  return {
+    taskId: String(data.task_id ?? ''),
+    batchId,
+    status: String(data.status ?? 'pending'),
+    message: String(data.message ?? '任务已提交，正在后台执行'),
+  }
+}
+
+export async function fetchDailyAiPredictionStatus(batchId: string): Promise<DailyAiPredictionStatusResult> {
+  const raw = await tlGetJson(`/tl/daily_ai_prediction_status/${encodeURIComponent(batchId)}`)
+  assertTlBizCode200(raw, '查询今日AI预测状态')
+  const data = asRecord(unwrapData(raw))
+  return {
+    batchId: String(data.batch_id ?? batchId),
+    status: String(data.status ?? ''),
+    resultCount: Number(data.result_count ?? 0),
+    errorMessage: data.error_message == null ? null : String(data.error_message),
+    createdAt: String(data.created_at ?? ''),
+    completedAt: data.completed_at == null ? null : String(data.completed_at),
+  }
+}
+
 export async function searchTlWarehouses(query: string, page = 1, size = 20): Promise<Record<string, unknown>[]> {
   const q = new URLSearchParams({ keyword: query, page: String(page), size: String(size) })
   const raw = await tlGetJson(`/tl/get_warehouses?${q.toString()}`)

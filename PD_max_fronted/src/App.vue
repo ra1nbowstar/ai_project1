@@ -2154,9 +2154,20 @@ onUnmounted(() => {
                     item.status === 'ok' ? '✓' : item.status === 'warn' ? '!' : '×'
                   }}</span>
                   <div class="rule-check-finding-body">
-                    <strong v-if="item.title" class="rule-check-finding-title">{{
-                      item.title
-                    }}</strong>
+                    <div class="rule-check-finding-head">
+                      <strong v-if="item.title" class="rule-check-finding-title">{{
+                        item.title
+                      }}</strong>
+                      <span
+                        class="rule-check-result-badge"
+                        :class="'rule-check-result-badge--' + item.status"
+                      >{{ item.resultLabel }}</span>
+                      <span class="rule-check-help" tabindex="0" :aria-label="item.explanation">
+                        ?
+                        <span class="rule-check-help-tip">{{ item.explanation }}</span>
+                      </span>
+                    </div>
+                    <p class="rule-check-finding-result">{{ item.resultText }}</p>
                     <p class="rule-check-finding-text">{{ item.text }}</p>
                     <dl v-if="item.details && item.details.length" class="rule-check-details">
                       <template v-for="(detail, dIdx) in item.details" :key="dIdx">
@@ -4595,6 +4606,15 @@ onUnmounted(() => {
 
 .rule-check-finding-body {
   min-width: 0;
+  width: 100%;
+}
+
+.rule-check-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
 }
 
 .rule-check-finding-title {
@@ -4602,7 +4622,95 @@ onUnmounted(() => {
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 0.2rem;
+}
+
+.rule-check-result-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 1.15rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.rule-check-result-badge--ok {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.rule-check-result-badge--warn {
+  border-color: #fed7aa;
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.rule-check-result-badge--bad {
+  border-color: #fecaca;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.rule-check-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: help;
+  outline: none;
+}
+
+.rule-check-help:hover,
+.rule-check-help:focus-visible {
+  border-color: #94a3b8;
+  color: #334155;
+}
+
+.rule-check-help-tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.45rem);
+  z-index: 20;
+  width: min(18rem, 72vw);
+  transform: translateX(-50%) translateY(0.2rem);
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.rule-check-help:hover .rule-check-help-tip,
+.rule-check-help:focus-visible .rule-check-help-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.rule-check-finding-result {
+  margin: 0 0 0.2rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text);
+  font-weight: 600;
 }
 
 .rule-check-finding-text {

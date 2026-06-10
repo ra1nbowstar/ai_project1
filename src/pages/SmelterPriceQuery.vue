@@ -9,11 +9,26 @@
 
           <p v-else-if="selectedSmelterNames.length === 0" class="summary-meta text-muted">请先在筛选区选择冶炼厂</p>
         </div>
-        <button type="button" class="btn btn-secondary" @click="emit('navigateToQuote')">前往维护</button>
+        <div class="summary-actions">
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="aiPredictionLoading || todayPriceChecking"
+            @click="handleStartPrediction"
+          >
+            <i class="bi bi-play-fill"></i>{{ aiPredictionButtonText }}
+          </button>
+          <button type="button" class="btn btn-secondary" @click="emit('navigateToQuote')">前往维护</button>
+        </div>
       </div>
 
       <p v-if="latestError && !latest" class="inline-error">{{ latestError }}</p>
       <p v-else-if="latestError && latest" class="inline-warn">{{ latestError }}</p>
+      <p
+        v-if="aiPredictionMessage"
+        class="prediction-status"
+        :class="{ 'prediction-status--error': aiPredictionState === 'failed' }"
+      >{{ aiPredictionMessage }}</p>
 
       <div v-if="latestLoading" class="summary-loading">正在查询最新报价…</div>
       <div v-else-if="latest" class="price-summary">
@@ -233,6 +248,24 @@
       数据为各冶炼厂报价信息，仅供参考。详细管理请前往「AI 比价系统」。
     </p>
 
+    <Transition name="modal-fade">
+      <div v-if="todayPriceConfirmVisible" class="confirm-mask" @click.self="closeTodayPriceConfirm">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="today-price-confirm-title">
+          <div class="confirm-head">
+            <span class="confirm-icon">?</span>
+            <h3 id="today-price-confirm-title">今日价格未更新</h3>
+          </div>
+          <p class="confirm-text">今日价格未更新，是否进行预测。</p>
+          <div class="confirm-actions">
+            <button type="button" class="btn btn-secondary" :disabled="aiPredictionLoading" @click="closeTodayPriceConfirm">取消</button>
+            <button type="button" class="btn btn-primary" :disabled="aiPredictionLoading" @click="confirmPredictionWithoutTodayPrice">
+              {{ aiPredictionLoading ? '预测中...' : '继续预测' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <Transition name="toast-fade">
       <div v-if="toastMsg" class="toast-tip" @click="toastMsg = ''">
         <i class="bi bi-info-circle"></i> {{ toastMsg }}
@@ -243,11 +276,20 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { fetchCategoryMapping, fetchTlSmeltersAll, fetchQuoteDetailsList, type TlCategoryRow, type TlQuoteDetailRow } from '@/api/tlApi'
+import {
+  fetchCategoryMapping,
+  fetchDailyAiPredictionStatus,
+  fetchQuoteDetailsList,
+  fetchTlSmeltersAll,
+  triggerDailyAiPrediction,
+  type TlCategoryRow,
+  type TlQuoteDetailRow,
+} from '@/api/tlApi'
 
 const emit = defineEmits<{ navigateToQuote: [] }>()
 
 const MULTI_PREVIEW_TAG_COUNT = 1
+const AI_PREDICTION_POLL_INTERVAL_MS = 3000
 
 const MULTI_LINE_COLORS = [
   '#1476db', '#e53935', '#2e7d32', '#f57c00', '#7b1fa2',
@@ -255,9 +297,17 @@ const MULTI_LINE_COLORS = [
 ]
 
 // ==================== 多选互斥 ====================
+type AiPredictionState = 'idle' | 'pending' | 'processing' | 'completed' | 'failed'
+
 const activeMultiSelectDim = ref<'smelter' | 'category' | null>(null)
 const toastMsg = ref('')
+const aiPredictionLoading = ref(false)
+const aiPredictionMessage = ref('')
+const aiPredictionState = ref<AiPredictionState>('idle')
+const todayPriceChecking = ref(false)
+const todayPriceConfirmVisible = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+let aiPredictionPollTimer: ReturnType<typeof setTimeout> | null = null
 
 function showToast(msg: string) {
   if (toastTimer) clearTimeout(toastTimer)
@@ -271,6 +321,124 @@ function checkSmelterMulti() {
 
 function checkCategoryMulti() {
   activeMultiSelectDim.value = selectedCategoryNames.value.length > 1 ? 'category' : null
+}
+
+function clearAiPredictionPollTimer() {
+  if (!aiPredictionPollTimer) return
+  clearTimeout(aiPredictionPollTimer)
+  aiPredictionPollTimer = null
+}
+
+function normalizeAiPredictionState(status: string): AiPredictionState {
+  if (status === 'pending' || status === 'processing' || status === 'completed' || status === 'failed') return status
+  return 'processing'
+}
+
+const aiPredictionButtonText = computed(() => {
+  if (todayPriceChecking.value) return '检查价格中...'
+  if (aiPredictionLoading.value) return '预测中...'
+  return '开始预测'
+})
+
+function todayDateString(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+async function hasTodayQuote(): Promise<boolean> {
+  const today = todayDateString()
+  const rows = await fetchAllQuotes({ start_date: today, end_date: today })
+  return rows.some((row) => row.date === today || row.date.startsWith(today))
+}
+
+function scheduleAiPredictionStatusPoll(batchId: string) {
+  clearAiPredictionPollTimer()
+  aiPredictionPollTimer = setTimeout(() => {
+    void pollDailyAiPredictionStatus(batchId)
+  }, AI_PREDICTION_POLL_INTERVAL_MS)
+}
+
+async function pollDailyAiPredictionStatus(batchId: string) {
+  try {
+    const status = await fetchDailyAiPredictionStatus(batchId)
+    const state = normalizeAiPredictionState(status.status)
+    aiPredictionState.value = state
+
+    if (state === 'completed') {
+      aiPredictionLoading.value = false
+      aiPredictionMessage.value = `AI预测已完成，生成 ${status.resultCount} 条结果`
+      showToast(aiPredictionMessage.value)
+      return
+    }
+
+    if (state === 'failed') {
+      aiPredictionLoading.value = false
+      aiPredictionMessage.value = status.errorMessage || 'AI预测失败，请稍后重试'
+      showToast(aiPredictionMessage.value)
+      return
+    }
+
+    aiPredictionLoading.value = true
+    aiPredictionMessage.value = 'AI预测正在后台执行，请稍候'
+    scheduleAiPredictionStatusPoll(batchId)
+  } catch (e) {
+    aiPredictionLoading.value = false
+    aiPredictionState.value = 'failed'
+    aiPredictionMessage.value = e instanceof Error ? e.message : '查询AI预测状态失败，请稍后重试'
+  }
+}
+
+async function startDailyAiPrediction() {
+  if (aiPredictionLoading.value) return
+  clearAiPredictionPollTimer()
+  aiPredictionLoading.value = true
+  aiPredictionState.value = 'pending'
+  aiPredictionMessage.value = '正在提交AI预测任务...'
+
+  try {
+    const result = await triggerDailyAiPrediction()
+    aiPredictionState.value = normalizeAiPredictionState(result.status)
+    aiPredictionMessage.value = result.message || 'AI预测任务已提交，正在后台执行'
+    showToast(aiPredictionMessage.value)
+    scheduleAiPredictionStatusPoll(result.batchId)
+  } catch (e) {
+    aiPredictionLoading.value = false
+    aiPredictionState.value = 'failed'
+    aiPredictionMessage.value = e instanceof Error ? e.message : '启动AI预测失败，请稍后重试'
+  }
+}
+
+async function handleStartPrediction() {
+  if (aiPredictionLoading.value || todayPriceChecking.value) return
+  todayPriceChecking.value = true
+  aiPredictionMessage.value = '正在检查今日价格是否已更新...'
+
+  try {
+    if (await hasTodayQuote()) {
+      await startDailyAiPrediction()
+      return
+    }
+    aiPredictionMessage.value = '今日价格未更新，请确认是否继续预测'
+    todayPriceConfirmVisible.value = true
+  } catch (e) {
+    aiPredictionState.value = 'failed'
+    aiPredictionMessage.value = e instanceof Error ? e.message : '检查今日价格失败，请稍后重试'
+  } finally {
+    todayPriceChecking.value = false
+  }
+}
+
+function closeTodayPriceConfirm() {
+  if (aiPredictionLoading.value) return
+  todayPriceConfirmVisible.value = false
+}
+
+async function confirmPredictionWithoutTodayPrice() {
+  todayPriceConfirmVisible.value = false
+  await startDailyAiPrediction()
 }
 
 // ==================== 冶炼厂多选 ====================
@@ -941,6 +1109,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (chartResizeHandler) window.removeEventListener('resize', chartResizeHandler)
+  clearAiPredictionPollTimer()
 })
 </script>
 
@@ -949,7 +1118,10 @@ onBeforeUnmount(() => {
 .card { background: white; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
 .summary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .summary-head-main { flex: 1; min-width: 200px; }
+.summary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .summary-meta { margin: 0; font-size: 13px; color: #606266; }
+.prediction-status { margin: 12px 0 0; padding: 8px 12px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; color: #475569; font-size: 13px; }
+.prediction-status--error { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
 .summary-loading { padding: 24px 0; color: #909399; text-align: center; }
 .price-summary { display: flex; align-items: flex-end; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
 .price-cell { display: flex; flex-direction: column; gap: 4px; }
@@ -974,6 +1146,7 @@ onBeforeUnmount(() => {
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-primary { background: #1476db; color: white; }
 .btn-secondary { background: #f5f7fa; color: #606266; border: 1px solid #e5e9f2; }
+.btn .bi { margin-right: 4px; }
 
 /* ==================== 多选下拉 ==================== */
 .multi-select-item { min-width: 200px; flex: 1; overflow: visible; }
@@ -1147,6 +1320,71 @@ onBeforeUnmount(() => {
 .text-muted { color: #909399; }
 .page-footer { font-size: 12px; color: #909399; line-height: 1.6; margin: 0 4px 8px; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  padding: 20px 24px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.confirm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.confirm-head h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.confirm-text {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.modal-fade-enter-active,
+.modal-fade-leave-active { transition: opacity 0.18s ease; }
+.modal-fade-enter-from,
+.modal-fade-leave-to { opacity: 0; }
 
 .toast-tip {
   position: fixed;
