@@ -1211,12 +1211,13 @@ export type RuleChecksPixelOverlap = {
   [key: string]: unknown
 }
 
-export type RuleChecksSemantic = {
-  passed?: boolean
-  message?: string
-  anomalies?: string[]
-  hard_tamper?: boolean
-  [key: string]: unknown
+/** POST /ai-detection/api/v1/rule-checks 不传 bbox 时返回的建议检测区域 */
+export type SuggestedRoi = {
+  bbox: [number, number, number, number]
+  label: string
+  category: string
+  priority: number
+  source: string
 }
 
 export type RuleChecksTimestampDetail = {
@@ -1253,8 +1254,11 @@ export type RuleChecksData = {
   /** 规则侧综合状态：正常 / 可疑 / 篡改 */
   status?: string
   pixel_overlap?: RuleChecksPixelOverlap | null
+  /** 像素重叠检测来源：传了 bbox 时为 "manual_bbox"，不传 bbox 且 pixel_overlap 为 null 时为 null */
+  pixel_overlap_source?: 'manual_bbox' | null
   timestamp?: RuleChecksTimestamp
-  semantic?: RuleChecksSemantic
+  /** 不传 bbox 时返回的建议检测区域，传了 bbox 时为 null */
+  suggested_rois?: SuggestedRoi[] | null
   hard_tamper_flags?: Record<string, boolean>
   reason?: string
 }
@@ -1335,21 +1339,6 @@ function normalizeTimestampBlock(
   }
 }
 
-function normalizeSemanticBlock(
-  raw: unknown,
-  flags?: Record<string, boolean>,
-): RuleChecksSemantic | undefined {
-  if (!isRecord(raw)) return undefined
-  const passed = raw.passed
-  const hard_tamper = raw.hard_tamper === true || flags?.semantic === true || passed === false
-  return {
-    passed: typeof passed === 'boolean' ? passed : undefined,
-    message: typeof raw.message === 'string' ? raw.message : undefined,
-    anomalies: Array.isArray(raw.anomalies) ? raw.anomalies.map(String) : undefined,
-    hard_tamper,
-  }
-}
-
 /** 解析 linked_rule_checks / 规则 outcome 完整结构 */
 export function normalizeLinkedRuleChecksObject(raw: Record<string, unknown>): RuleChecksData | null {
   if (raw.available === false) {
@@ -1365,10 +1354,9 @@ export function normalizeLinkedRuleChecksObject(raw: Record<string, unknown>): R
     : undefined
   const pixel = normalizePixelOverlapBlock(raw.pixel_overlap, flags)
   const timestamp = normalizeTimestampBlock(raw.timestamp, flags)
-  const semantic = normalizeSemanticBlock(raw.semantic, flags)
   const reason = typeof raw.reason === 'string' ? raw.reason : undefined
 
-  if (!pixel && !timestamp && !semantic && !reason && raw.available !== true) {
+  if (!pixel && !timestamp && !reason && raw.available !== true) {
     return null
   }
 
@@ -1376,8 +1364,12 @@ export function normalizeLinkedRuleChecksObject(raw: Record<string, unknown>): R
     available: raw.available === true ? true : undefined,
     status: typeof raw.status === 'string' ? raw.status : undefined,
     pixel_overlap: pixel,
+    pixel_overlap_source:
+      typeof raw.pixel_overlap_source === 'string' && raw.pixel_overlap_source === 'manual_bbox'
+        ? 'manual_bbox'
+        : null,
     timestamp,
-    semantic,
+    suggested_rois: Array.isArray(raw.suggested_rois) ? raw.suggested_rois as SuggestedRoi[] : null,
     hard_tamper_flags: flags,
     reason,
   }
@@ -1403,8 +1395,12 @@ function normalizeRuleChecksJson(json: unknown): RuleChecksData {
   if (linked) return linked
   return {
     pixel_overlap: normalizePixelOverlapBlock(o.pixel_overlap),
+    pixel_overlap_source:
+      typeof o.pixel_overlap_source === 'string' && o.pixel_overlap_source === 'manual_bbox'
+        ? 'manual_bbox'
+        : null,
     timestamp: normalizeTimestampBlock(o.timestamp),
-    semantic: normalizeSemanticBlock(o.semantic),
+    suggested_rois: Array.isArray(o.suggested_rois) ? o.suggested_rois as SuggestedRoi[] : null,
     hard_tamper_flags: isRecord(o.hard_tamper_flags)
       ? (o.hard_tamper_flags as Record<string, boolean>)
       : undefined,
@@ -1428,7 +1424,7 @@ export function parseLinkedRuleChecksField(raw: unknown): RuleChecksData | null 
   }
   try {
     const fromLayer = normalizeRuleChecksJson(isRecord(raw) ? { data: raw } : raw)
-    if (fromLayer.available === false || fromLayer.pixel_overlap || fromLayer.timestamp || fromLayer.semantic || fromLayer.reason) {
+    if (fromLayer.available === false || fromLayer.pixel_overlap || fromLayer.timestamp || fromLayer.suggested_rois || fromLayer.reason) {
       return fromLayer
     }
   } catch {
