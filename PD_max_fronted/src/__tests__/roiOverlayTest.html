@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROI 覆盖层测试 — 正交折线 + 芯片标签</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f1f5f9; color: #1e293b; padding: 1.5rem; min-height: 100vh; }
+  h1 { font-size: 1.25rem; margin-bottom: 0.75rem; }
+  .container { display: flex; gap: 1.5rem; max-width: 1400px; margin: 0 auto; }
+  .panel { flex: 1; min-width: 0; }
+
+  .stage {
+    position: relative; display: flex; justify-content: center; align-items: center;
+    background: #0f172a; border-radius: 8px; overflow: hidden; margin-bottom: 1rem;
+  }
+  .preview-img { display: block; max-width: 100%; max-height: 50vh; cursor: zoom-in; }
+  .overlay-svg { position: absolute; inset: 0; pointer-events: none; }
+  .overlay-svg .roi-rect { pointer-events: auto; cursor: pointer; }
+
+  .card { background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 0.75rem; }
+  .card h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+  .hint { font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem; }
+  .warning { font-size: 0.75rem; color: #92400e; background: #fef3c7; padding: 0.35rem 0.55rem; border-radius: 4px; margin-bottom: 0.4rem; }
+  .legend-note {
+    font-size: 0.72rem; color: #64748b; line-height: 1.55; margin: 0 0 0.6rem;
+    padding: 0.35rem 0.55rem; background: #f8fafc; border-radius: 4px; border-left: 3px solid #e2e8f0;
+  }
+  .toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+  .toolbar button { border: none; background: #e2e8f0; color: #334155; padding: 0.25rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+  .toolbar button:hover { background: #cbd5e1; }
+
+  .roi-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.35rem 0.5rem; border-left: 3px solid transparent;
+    border-radius: 0 4px 4px 0; cursor: pointer; transition: all 0.15s;
+  }
+  .roi-item:hover { background: #f8fafc; }
+  .roi-item.selected { border-left-color: #2563eb; background: rgba(37,99,235,.04); }
+  .roi-item input { cursor: pointer; width: 1rem; height: 1rem; accent-color: #2563eb; flex-shrink: 0; }
+  .roi-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; transition: background 0.15s; }
+  .roi-idx { font-weight: 700; color: #2563eb; font-size: 0.82rem; min-width: 2em; flex-shrink: 0; }
+  .roi-cat { font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 4px; flex-shrink: 0; }
+  .roi-cat--high { background: #fee2e2; color: #dc2626; }
+  .roi-cat--normal { background: #f3f4f6; color: #6b7280; }
+  .roi-prio { font-size: 0.68rem; color: #94a3b8; flex-shrink: 0; }
+  .btn-primary { border: none; background: #2563eb; color: #fff; padding: 0.5rem 1.25rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem; }
+  .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+
+  .lightbox { position: fixed; inset: 0; z-index: 9999; background: rgba(15,23,42,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem 1rem 1.5rem; }
+  .lightbox-close { position: fixed; top: 0.85rem; right: 1rem; width: 2.5rem; height: 2.5rem; border: none; background: rgba(255,255,255,.12); color: #fff; font-size: 1.5rem; border-radius: 50%; cursor: pointer; line-height: 1; }
+  .lightbox-stage { max-width: 96vw; max-height: calc(100vh - 6rem); width: 96vw; height: calc(100vh - 6rem); overflow: auto; border-radius: 8px; }
+  .lightbox-img-wrap { position: relative; display: inline-block; line-height: 0; min-width: 100%; }
+  .lightbox-img { max-width: none; max-height: none; width: min(160vw, 1600px); height: auto; display: block; border-radius: 8px; box-shadow: 0 12px 48px rgba(0,0,0,.45); }
+  .lightbox-overlay { position: absolute; inset: 0; pointer-events: none; }
+
+  .result { margin-top: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.82rem; }
+  .result.success { background: #dcfce7; color: #166534; }
+  .result.fail { background: #fee2e2; color: #991b1b; }
+  code { font-family: monospace; font-size: 0.75rem; background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>🧪 ROI 覆盖层测试 — 正交折线 + 芯片标签</h1>
+<p style="font-size:0.8rem;color:#64748b;margin-bottom:1rem;">
+  标签→图片右侧列·Y排序·正交折线·白色芯片·彩色边框·不遮挡原图
+</p>
+
+<div class="container">
+  <div class="panel">
+    <div class="stage" id="stage">
+      <img id="previewImg" class="preview-img" src="" alt="测试图片" />
+      <svg id="overlay" class="overlay-svg"></svg>
+    </div>
+    <div id="testResults"></div>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <h2>建议检测区域</h2>
+      <p class="hint">系统识别到以下可能被修改的区域，勾选或在图片上点击框线即可选中。</p>
+      <p id="lowConfWarning" class="warning" style="display:none;">⚠ 当前所有区域均为自动检测（准确度较低），建议人工判断后再勾选。</p>
+      <p class="legend-note">
+        <strong>金额候选</strong>：OCR 自动发现"含数字行"，未匹配到标签（金额/账号/时间/单号/姓名）。<strong>P6</strong>：优先级 6（最低），1=金额 2=账号 3=时间 4=单号 5=姓名/昵称 6=金额候选（兜底）。
+      </p>
+      <div class="toolbar">
+        <button id="btnSelectAll">全选</button>
+        <button id="btnDeselectAll">取消全选</button>
+      </div>
+      <div id="roiList"></div>
+      <button id="btnDetect" class="btn-primary">检测选中区域</button>
+    </div>
+  </div>
+</div>
+
+<div id="lightbox" class="lightbox" style="display:none;">
+  <button id="lightboxClose" class="lightbox-close">&times;</button>
+  <div id="lightboxStage" class="lightbox-stage">
+    <div class="lightbox-img-wrap">
+      <img id="lightboxImg" class="lightbox-img" src="" alt="" />
+      <svg id="lightboxOverlay" class="lightbox-overlay"></svg>
+    </div>
+  </div>
+</div>
+
+<script>
+  const MOCK_ROIS = [
+    { bbox: [156, 710, 391, 744], label: "2026.0+.22.4..7.43",        category: "金额候选", priority: 6 },
+    { bbox: [156, 752, 391, 784], label: "2026.0..22.4:.7.04",        category: "金额候选", priority: 6 },
+    { bbox: [156, 793, 391, 822], label: "4.3339523975",              category: "金额候选", priority: 6 },
+    { bbox: [156, 834, 391, 866], label: "5账网间2026.0..22.4:.7.04", category: "金额候选", priority: 6 },
+    { bbox: [390, 868, 568, 898], label: "交鼎全鬣小弓:.20.7.00-",    category: "金额候选", priority: 6 },
+    { bbox: [156, 916, 391, 946], label: "代款万冀信34.3339523975",   category: "金额候选", priority: 6 },
+    { bbox: [156, 958, 391, 990], label: "吹娶问2026.0+.22.4..7.43",  category: "金额候选", priority: 6 },
+    { bbox: [390,1000, 568,1030], label: "小弓:.20.7.00-",            category: "金额候选", priority: 6 },
+    { bbox: [390,1042, 568,1072], label: "箪涛阿闸:2026.0..22.4.20.37",category: "金额候选", priority: 6 },
+  ]
+
+  const ROI_STROKES = ['#2563eb','#0d9488','#7c3aed','#dc2626','#ea580c','#0891b2','#4f46e5','#b91c1c']
+  function roiStroke(idx) { return ROI_STROKES[idx % ROI_STROKES.length] }
+  function hexToRgba(hex,a) {
+    const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return m?`rgba(${parseInt(m[1],16)},${parseInt(m[2],16)},${parseInt(m[3],16)},${a})`:`rgba(0,0,0,${a})`
+  }
+
+  let imageNatural={w:0,h:0}, lightboxImageNatural={w:0,h:0}
+  let selectedIndices=new Set()
+
+  // ===== 全局标签布局：右侧列 + Y排序 + 正交折线 + 芯片 =====
+  function computeLayouts(rois, imgW, imgH) {
+    const n = rois.length
+    if (n === 0) return []
+
+    const chipH = 22, chipPadX = 10, marginR = 28, marginL = 28, boxStep = 10, topM = 12
+    const minSpacing = 42
+
+    // 按框中心 Y 排序
+    const items = rois.map((r, i) => {
+      const [x1, y1, x2, y2] = r.bbox
+      return { idx: i, x1, y1, x2, y2, cy: y1 + Math.max(0, y2 - y1) / 2 }
+    }).sort((a, b) => a.cy - b.cy)
+
+    const availH = imgH - topM - 12
+    const step = Math.max(minSpacing, Math.min(availH / n, n > 1 ? availH / (n - 1) : availH))
+    const totalH = (n - 1) * step + chipH
+    const used = totalH > availH ? Math.max(28, availH / Math.max(n, 1)) : step
+
+    // 分配 Y 和 side
+    const plans = items.map((item, i) => {
+      const ly = topM + i * used + chipH / 2
+      const clampedY = Math.max(chipH / 2 + 2, Math.min(imgH - chipH / 2 - 2, ly))
+      const estW = 44
+      const side = item.x2 + estW + marginR > imgW ? 'left' : 'right'
+      return { idx: item.idx, item, ly: clampedY, side }
+    })
+
+    // 构建结果
+    const result = new Array(n)
+    for (const p of plans) {
+      const label = `A${p.idx + 1}`
+      const cw = Math.max(36, label.length * 9 + chipPadX * 2)
+      const chipX = p.side === 'right' ? imgW - marginR - cw : marginL
+      const tx = p.side === 'right' ? imgW - marginR - 4 : marginL + 4
+      const { x1, x2, cy } = p.item
+      const pts = p.side === 'right'
+        ? `${x2},${cy} ${x2 + boxStep},${cy} ${x2 + boxStep},${p.ly} ${chipX - 4},${p.ly}`
+        : `${x1},${cy} ${x1 - boxStep},${cy} ${x1 - boxStep},${p.ly} ${chipX + cw + 4},${p.ly}`
+
+      result[p.idx] = {
+        chipX, chipY: p.ly - chipH / 2, cw, ch: chipH,
+        tx, ty: p.ly, linePoints: pts,
+      }
+    }
+    return result
+  }
+
+  // ===== 渲染 =====
+  function renderRoiList() {
+    const allLow = MOCK_ROIS.every(r => r.priority >= 5)
+    document.getElementById('lowConfWarning').style.display = allLow ? '' : 'none'
+
+    document.getElementById('roiList').innerHTML = MOCK_ROIS.map((roi, idx) => {
+      const sel = selectedIndices.has(idx)
+      return `<div class="roi-item${sel ? ' selected' : ''}" data-idx="${idx}" title="${roi.label}">
+        <input type="checkbox" ${sel ? 'checked' : ''} data-idx="${idx}" />
+        <span class="roi-dot" style="background:${sel ? roiStroke(idx) : '#cbd5e1'}"></span>
+        <span class="roi-idx">A${idx + 1}</span>
+        <span class="roi-cat roi-cat--normal">${roi.category}</span>
+        <span class="roi-prio">P${roi.priority}</span>
+      </div>`
+    }).join('')
+
+    document.querySelectorAll('.roi-item').forEach(el => {
+      el.addEventListener('click', e => { if (e.target.tagName === 'INPUT') return; toggleRoi(+el.dataset.idx) })
+    })
+    document.querySelectorAll('#roiList input').forEach(cb => {
+      cb.addEventListener('change', () => toggleRoi(+cb.dataset.idx))
+    })
+  }
+
+  function toggleRoi(idx) {
+    selectedIndices.has(idx) ? selectedIndices.delete(idx) : selectedIndices.add(idx)
+    renderRoiList(); renderOverlay()
+  }
+
+  function renderOverlaySvg(svg, imgW, imgH) {
+    svg.setAttribute('viewBox', `0 0 ${imgW} ${imgH}`)
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+    const layouts = computeLayouts(MOCK_ROIS, imgW, imgH)
+    const sw = Math.max(1.5, imgW * 0.0015)
+    const dotR = Math.max(2.5, sw * 0.28)
+
+    svg.innerHTML = MOCK_ROIS.map((roi, idx) => {
+      const [x1, y1, x2, y2] = roi.bbox
+      const w = Math.max(0, x2 - x1), h = Math.max(0, y2 - y1)
+      const lay = layouts[idx]
+      const sel = selectedIndices.has(idx)
+      const color = sel ? roiStroke(idx) : '#94a3b8'
+      const fill = sel ? hexToRgba(roiStroke(idx), 0.08) : 'rgba(148,163,184,0.05)'
+      const dash = sel ? 'none' : '4 3'
+      const fs = Math.max(11, Math.min(14, imgW * 0.014))
+      const ta = lay.tx > imgW / 2 ? 'end' : 'start'
+      return `<g>
+        <!-- 框 -->
+        <rect class="roi-rect" data-idx="${idx}" x="${x1}" y="${y1}" width="${w}" height="${h}"
+              fill="${fill}" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash}"
+              style="cursor:pointer;pointer-events:auto;" />
+        <!-- 框边连接点 -->
+        <circle cx="${x2}" cy="${y1 + h / 2}" r="${dotR}" fill="${color}" stroke="none" />
+        <!-- 正交折线 -->
+        <polyline points="${lay.linePoints}" stroke="${color}"
+                  stroke-width="${Math.max(0.8, sw * 0.45)}"
+                  stroke-dasharray="${sel ? 'none' : '3 2'}" fill="none"
+                  style="pointer-events:none;" />
+        <!-- 芯片背景 -->
+        <rect x="${lay.chipX}" y="${lay.chipY}" width="${lay.cw}" height="${lay.ch}"
+              rx="4" ry="4" fill="${sel ? '#ffffff' : '#f8fafc'}"
+              stroke="${color}" stroke-width="${Math.max(1.2, sw * 0.4)}"
+              style="pointer-events:none;" />
+        <!-- 芯片文字 -->
+        <text x="${lay.tx}" y="${lay.ty}" text-anchor="${ta}" dominant-baseline="central"
+              font-size="${fs}" font-weight="700" fill="${color}"
+              style="font-family:system-ui,sans-serif;pointer-events:none;">A${idx + 1}</text>
+      </g>`
+    }).join('')
+
+    svg.querySelectorAll('.roi-rect').forEach(r => {
+      r.addEventListener('click', e => { e.stopPropagation(); toggleRoi(+r.dataset.idx) })
+    })
+  }
+
+  function renderOverlay() {
+    if (imageNatural.w > 0) renderOverlaySvg(document.getElementById('overlay'), imageNatural.w, imageNatural.h)
+    if (lightboxImageNatural.w > 0) renderOverlaySvg(document.getElementById('lightboxOverlay'), lightboxImageNatural.w, lightboxImageNatural.h)
+  }
+
+  // ===== 图片 =====
+  document.getElementById('previewImg').addEventListener('load', function() {
+    imageNatural = { w: this.naturalWidth, h: this.naturalHeight }
+    MOCK_ROIS.forEach((_, i) => selectedIndices.add(i))
+    renderRoiList(); renderOverlay(); runTests()
+  })
+
+  // ===== Lightbox =====
+  document.getElementById('previewImg').addEventListener('click', function() {
+    if (imageNatural.w === 0) return
+    document.getElementById('lightboxImg').src = this.src
+    lightboxImageNatural = { ...imageNatural }
+    document.getElementById('lightbox').style.display = 'flex'
+    document.getElementById('lightboxStage').scrollTop = 0
+    setTimeout(() => renderOverlay(), 50)
+  })
+  document.getElementById('lightboxClose').addEventListener('click', closeLb)
+  document.getElementById('lightbox').addEventListener('click', function(e) { if (e.target === this) closeLb() })
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLb() })
+  function closeLb() { document.getElementById('lightbox').style.display = 'none'; lightboxImageNatural = { w: 0, h: 0 } }
+  document.getElementById('lightboxImg').addEventListener('load', function() {
+    lightboxImageNatural = { w: this.naturalWidth, h: this.naturalHeight }; renderOverlay(); runLbTests()
+  })
+
+  // ===== 按钮 =====
+  document.getElementById('btnSelectAll').addEventListener('click', () => { MOCK_ROIS.forEach((_, i) => selectedIndices.add(i)); renderRoiList(); renderOverlay() })
+  document.getElementById('btnDeselectAll').addEventListener('click', () => { selectedIndices.clear(); renderRoiList(); renderOverlay() })
+  document.getElementById('btnDetect').addEventListener('click', () => {
+    if (selectedIndices.size === 0) return
+    alert(`模拟：已选中 ${selectedIndices.size} 个区域，将调用 /rule-checks 进行像素重叠检测。`)
+  })
+
+  // ===== 测试 =====
+  let tp = 0, tt = 0
+  function ar(label, pass, detail) {
+    document.getElementById('testResults').innerHTML +=
+      `<div class="result ${pass ? 'success' : 'fail'}">${pass ? '✓' : '✗'} ${label}${detail ? ': <code>' + detail + '</code>' : ''}</div>`
+    if (pass) tp++; tt++
+  }
+
+  function runTests() {
+    const el = document.getElementById('testResults')
+    el.innerHTML = '<h3 style="margin:1rem 0 0.5rem;font-size:0.9rem;">测试结果</h3>'; tp = 0; tt = 0
+
+    ar('图片加载', imageNatural.w > 0, `${imageNatural.w}×${imageNatural.h}`)
+    ar('列表 9 项', document.querySelectorAll('.roi-item').length === 9)
+
+    // 芯片标签（rect 背景的 text）
+    const allRects = document.querySelectorAll('#overlay rect')
+    // 9 个框 + 9 个芯片 = 18 个 rect
+    ar('框+芯片共 18 个 rect', allRects.length === 18, `${allRects.length} 个`)
+
+    // 芯片（有 rx 属性的 rect）
+    const chips = [...allRects].filter(r => r.getAttribute('rx') === '4')
+    ar('芯片 9 个', chips.length === 9, `${chips.length} 个`)
+    // 芯片白色背景
+    const whiteChips = chips.filter(c => c.getAttribute('fill') === '#ffffff')
+    ar('选中芯片白底', whiteChips.length === 9, `${whiteChips.length} 个`)
+
+    // 正交折线（polyline）
+    const lines = document.querySelectorAll('#overlay polyline')
+    ar('引导线 9 条', lines.length === 9, `${lines.length} 条`)
+
+    // 折线有4个点（正交 → 3段）
+    const ptsCounts = [...lines].map(l => l.getAttribute('points').split(' ').length)
+    const all4pt = ptsCounts.every(n => n === 4)
+    ar('每条折线 4 个点（3段正交）', all4pt, ptsCounts.join(','))
+
+    // 标签在右侧列
+    const texts = document.querySelectorAll('#overlay text')
+    const allRight = [...texts].every(t => {
+      const x = parseFloat(t.getAttribute('x'))
+      return x > imageNatural.w * 0.5
+    })
+    ar('标签全部在右侧', allRight, `${[...texts].filter(t => parseFloat(t.getAttribute('x')) > imageNatural.w * 0.5).length}/${texts.length}`)
+
+    // 全选
+    ar('全选状态', selectedIndices.size === 9)
+    ar('警告显示', document.getElementById('lowConfWarning').style.display !== 'none')
+    ar('概念解释存在', document.querySelector('.legend-note').textContent.includes('金额候选'))
+
+    // 取消全选 → 虚线
+    selectedIndices.clear(); renderRoiList(); renderOverlay()
+    const allDashed = [...document.querySelectorAll('#overlay .roi-rect')].every(r => r.getAttribute('stroke-dasharray') !== 'none')
+    ar('取消全选后虚线', allDashed)
+    MOCK_ROIS.forEach((_, i) => selectedIndices.add(i)); renderRoiList(); renderOverlay()
+
+    el.innerHTML += `<div class="result ${tp === tt ? 'success' : 'fail'}" style="margin-top:0.5rem;font-weight:700;">${tp}/${tt} 通过</div>`
+  }
+
+  function runLbTests() {
+    const el = document.getElementById('testResults')
+    const chips = [...document.querySelectorAll('#lightboxOverlay rect')].filter(r => r.getAttribute('rx') === '5')
+    el.innerHTML += `<div class="result ${chips.length === 9 ? 'success' : 'fail'}">${chips.length === 9 ? '✓' : '✗'} Lightbox 芯片: <code>${chips.length} 个</code></div>`
+    if (chips.length === 9) tp++; tt++
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const img = document.getElementById('previewImg')
+    img.src = '../../../279.jpg'
+    img.addEventListener('error', () => {
+      img.src = 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="1216" height="1150">
+          <rect width="1216" height="1150" fill="#f8fafc"/>
+          <text x="608" y="560" text-anchor="middle" font-family="system-ui" font-size="24" fill="#94a3b8">请将 279.jpg 放在项目根目录</text>
+          <text x="608" y="600" text-anchor="middle" font-family="system-ui" font-size="16" fill="#cbd5e1">当前 1216×1150 占位图</text>
+        </svg>`)
+    })
+  })
+</script>
+</body>
+</html>

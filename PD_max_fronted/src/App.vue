@@ -27,6 +27,7 @@ import {
   type FeedbackJudgment,
   type HealthStatus,
   type RuleChecksData,
+  type SuggestedRoi,
   type TrainingDatasetEntry,
   type TrainingDatasetFilter,
   type TrainingDatasetLabel,
@@ -89,6 +90,12 @@ const ruleCheckLoading = ref(false)
 const ruleCheckError = ref<string | null>(null)
 const ruleCheckElapsed = ref<number | null>(null)
 const aiElapsed = ref<number | null>(null)
+/** 不传 bbox 时后端返回的建议检测区域 */
+const suggestedRois = ref<SuggestedRoi[] | null>(null)
+/** 用户在 suggested_rois 列表中勾选的索引数组 */
+const selectedRoiIndices = ref<number[]>([])
+/** 是否正在对选中的 ROI 执行二次检测 */
+const roiDetectBusy = ref(false)
 
 const ruleCheckVerdictInfo = computed(() => ruleCheckVerdict(ruleCheckPayload.value))
 const ruleCheckUserView = computed(() => buildRuleCheckUserView(ruleCheckPayload.value))
@@ -326,6 +333,9 @@ function resetRuleCheck() {
   ruleCheckLoading.value = false
   ruleCheckElapsed.value = null
   aiElapsed.value = null
+  suggestedRois.value = null
+  selectedRoiIndices.value = []
+  roiDetectBusy.value = false
 }
 
 function resetResults() {
@@ -387,6 +397,16 @@ function applyLinkedRuleChecksFromPoll(
 ) {
   if (linked != null) {
     ruleCheckPayload.value = linked
+    if (linked.suggested_rois && linked.suggested_rois.length > 0) {
+      suggestedRois.value = linked.suggested_rois
+      // 优先默认选中 priority 1-4；若全部为低优先级(5-6)则全选
+      const highPrio = linked.suggested_rois
+        .map((roi, i) => (roi.priority <= 4 ? i : -1))
+        .filter((i) => i >= 0)
+      selectedRoiIndices.value = highPrio.length > 0
+        ? highPrio
+        : linked.suggested_rois.map((_, i) => i)
+    }
   } else if (expected) {
     ruleCheckPayload.value = emptyLinkedRuleChecks()
   } else {
@@ -732,6 +752,20 @@ async function startRuleChecks(
       task_id: taskId,
     })
     ruleCheckPayload.value = data
+    // 处理 suggested_rois：不传 bbox 时后端返回建议检测区域
+    if (data.suggested_rois && data.suggested_rois.length > 0) {
+      suggestedRois.value = data.suggested_rois
+      // 优先默认选中 priority 1-4；若全部为低优先级(5-6)则全选
+      const highPrio = data.suggested_rois
+        .map((roi, i) => (roi.priority <= 4 ? i : -1))
+        .filter((i) => i >= 0)
+      selectedRoiIndices.value = highPrio.length > 0
+        ? highPrio
+        : data.suggested_rois.map((_, i) => i)
+    } else {
+      suggestedRois.value = null
+      selectedRoiIndices.value = []
+    }
     ruleCheckElapsed.value = Math.round(performance.now() - t0)
     return data
   } catch (e) {
@@ -782,10 +816,47 @@ async function runRuleSingle(file: File) {
   }
 }
 
+/** 用户从 suggested_rois 中勾选区域后，以选中的 bbox 重新执行规则检测 */
+async function runRoiDetect(file: File) {
+  const rois = suggestedRois.value
+  if (!rois || selectedRoiIndices.value.length === 0) return
+
+  // 获取第一个选中的 ROI 的 bbox
+  const sorted = [...selectedRoiIndices.value].sort((a, b) => a - b)
+  const firstIdx = sorted[0]
+  if (firstIdx == null) return
+  const selectedRoi = rois[firstIdx]
+  if (!selectedRoi) return
+
+  roiDetectBusy.value = true
+  ruleCheckLoading.value = true
+  ruleCheckError.value = null
+  ruleCheckElapsed.value = null
+  const t0 = performance.now()
+  try {
+    const data = await submitRuleChecks(file, selectedRoi.bbox as BboxXYXY, {
+      ...detectSubmitOpts(new AbortController().signal),
+    })
+    ruleCheckPayload.value = data
+    ruleCheckElapsed.value = Math.round(performance.now() - t0)
+    // 传了 bbox，pixel_overlap 应当有结果，suggested_rois 应为 null
+    suggestedRois.value = null
+    selectedRoiIndices.value = []
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    const message = e instanceof Error ? e.message : String(e)
+    ruleCheckError.value = message || '规则检测失败'
+    ruleCheckElapsed.value = Math.round(performance.now() - t0)
+  } finally {
+    ruleCheckLoading.value = false
+    roiDetectBusy.value = false
+  }
+}
+
 async function runRuleBatch(batchFiles: File[]) {
   if (!batchFiles.length) return
   if (v3SpecifyBbox.value) {
-    errorMsg.value = '批量检测暂不支持“仅分析框选区域”，请关闭后重试。'
+    errorMsg.value = '批量检测暂不支持”仅分析框选区域”，请关闭后重试。'
     return
   }
 
@@ -1154,12 +1225,20 @@ const previewNumberedRenderList = computed(() =>
 const previewLightboxOpen = ref(false)
 const previewLightboxSrc = ref('')
 const previewLightboxStageRef = ref<HTMLElement | null>(null)
+const lightboxImgRef = ref<HTMLImageElement | null>(null)
+const lightboxImgNatural = ref({ w: 0, h: 0 })
 
 function openPreviewLightbox(src?: string) {
   const target = (src ?? activePreviewUrl.value ?? '').trim()
   if (!target) return
   previewLightboxSrc.value = target
   previewLightboxOpen.value = true
+  // 若与当前预览图片同源，直接复用已知尺寸
+  if (target === activePreviewUrl.value && imageNatural.value.w > 0) {
+    lightboxImgNatural.value = { w: imageNatural.value.w, h: imageNatural.value.h }
+  } else {
+    lightboxImgNatural.value = { w: 0, h: 0 }
+  }
   window.addEventListener('keydown', onPreviewLightboxKeydown)
   nextTick(() => {
     const stage = previewLightboxStageRef.value
@@ -1172,7 +1251,15 @@ function openPreviewLightbox(src?: string) {
 function closePreviewLightbox() {
   previewLightboxOpen.value = false
   previewLightboxSrc.value = ''
+  lightboxImgNatural.value = { w: 0, h: 0 }
   window.removeEventListener('keydown', onPreviewLightboxKeydown)
+}
+
+function onLightboxImgLoad() {
+  const el = lightboxImgRef.value
+  lightboxImgNatural.value = el
+    ? { w: el.naturalWidth, h: el.naturalHeight }
+    : { w: 0, h: 0 }
 }
 
 function onPreviewLightboxKeydown(e: KeyboardEvent) {
@@ -1189,6 +1276,151 @@ const userBboxXYWH = computed(() => {
   const [x1, y1, x2, y2] = userBbox.value
   return [x1, y1, x2 - x1, y2 - y1] as const
 })
+
+/** 将 suggested_rois 转为图片上可渲染的矩形列表，含标签芯片 + 正交引导线 */
+type RoiRenderRect = {
+  idx: number
+  x: number; y: number; w: number; h: number
+  category: string; ocrLabel: string; displayLabel: string; priority: number
+  selected: boolean
+  stroke: string; dash: string
+  /** 芯片矩形：x, y, w, h */
+  cx: number; cy: number; cw: number; ch: number
+  /** 标签文字锚点坐标 */
+  tx: number; ty: number
+  /** 正交折线路径点串 "x1,y1 x2,y2 x3,y3 x4,y4" */
+  linePoints: string
+}
+
+/** 全局计算所有 ROI 的标签布局：右侧列 + Y 排序 + 正交折线 + 芯片样式 */
+function computeAllRoiLayouts(
+  rois: SuggestedRoi[],
+  imgW: number,
+  imgH: number,
+): Pick<RoiRenderRect, 'cx' | 'cy' | 'cw' | 'ch' | 'tx' | 'ty' | 'linePoints'>[] {
+  const count = rois.length
+  if (count === 0) return []
+
+  // 标签芯片尺寸
+  const chipH = 22
+  const chipPadX = 10
+  const marginRight = 28   // 距图片右边缘
+  const marginLeft = 28    // 距图片左边缘
+  const labelSpacing = 42  // 标签之间最小间距
+  const boxHStep = 10      // 框边外移距离
+
+  // 先按框中心 Y 排序，确定垂直顺序
+  const indexed = rois.map((roi, i) => {
+    const [x1, y1, x2, y2] = roi.bbox
+    return { idx: i, x1, y1, x2, y2, cy: y1 + Math.max(0, y2 - y1) / 2, cx: x1 + Math.max(0, x2 - x1) / 2 }
+  })
+  indexed.sort((a, b) => a.cy - b.cy)
+
+  // 垂直布局：从 topMargin 开始均匀分布
+  const topMargin = 12
+  const availH = imgH - topMargin - 12
+  const step = Math.max(labelSpacing, Math.min(availH / count, availH / Math.max(count - 1, 1)))
+  // 如果总高度超出可用空间则压缩
+  const totalH = (count - 1) * step + chipH
+  const usedSpacing = totalH > availH ? Math.max(28, availH / Math.max(count, 1)) : step
+
+  // 为每个 ROI 分配标签 Y（按排序后的顺序）
+  const layouts = new Array<{
+    idx: number; ly: number; side: 'right' | 'left'
+  }>(count)
+
+  for (let i = 0; i < count; i++) {
+    const item = indexed[i]!
+    const ly = topMargin + i * usedSpacing + chipH / 2
+    // 框靠近右边缘（< chipW + margin）则放左侧
+    const estChipW = 44
+    const side: 'right' | 'left' = item.x2 + estChipW + marginRight > imgW ? 'left' : 'right'
+    layouts[i] = { idx: item.idx, ly: Math.max(chipH / 2 + 2, Math.min(imgH - chipH / 2 - 2, ly)), side }
+  }
+
+  // 构建结果（按原始 idx 排序返回）
+  const result = new Array<Pick<RoiRenderRect, 'cx' | 'cy' | 'cw' | 'ch' | 'tx' | 'ty' | 'linePoints'>>(count)
+
+  for (let i = 0; i < count; i++) {
+    const item = indexed[i]!
+    const layout = layouts[i]!
+    const { ly, side } = layout
+    const label = `A${item.idx + 1}`
+    // 估算芯片宽度：每个字符约 0.6em ≈ 8px（font-size≈13px），加左右 padding
+    const estCw = Math.max(36, label.length * 9 + chipPadX * 2)
+    const cw = estCw
+
+    // 芯片 X：右侧靠右边缘，左侧靠左边缘
+    let chipX: number, tx: number
+    if (side === 'right') {
+      chipX = imgW - marginRight - cw
+      tx = imgW - marginRight - 4  // text-anchor: end
+    } else {
+      chipX = marginLeft
+      tx = marginLeft + 4  // text-anchor: start
+    }
+
+    // 正交折线路径
+    let pts: string
+    if (side === 'right') {
+      // 框右边缘 → 右移 → 垂直 → 到芯片左侧
+      pts = `${item.x2},${item.cy} ${item.x2 + boxHStep},${item.cy} ${item.x2 + boxHStep},${ly} ${chipX - 4},${ly}`
+    } else {
+      // 框左边缘 → 左移 → 垂直 → 到芯片右侧
+      pts = `${item.x1},${item.cy} ${item.x1 - boxHStep},${item.cy} ${item.x1 - boxHStep},${ly} ${chipX + cw + 4},${ly}`
+    }
+
+    result[item.idx] = {
+      cx: chipX, cy: ly - chipH / 2, cw, ch: chipH,
+      tx, ty: ly,
+      linePoints: pts,
+    }
+  }
+
+  return result
+}
+
+/** ROI 区域颜色调色板（与 AI 检测结果保持风格一致） */
+const ROI_STROKES = ['#2563eb', '#0d9488', '#7c3aed', '#dc2626', '#ea580c', '#0891b2', '#4f46e5', '#b91c1c'] as const
+
+function roiStrokeForIndex(idx: number): string {
+  return ROI_STROKES[idx % ROI_STROKES.length]
+}
+
+const suggestedRoiRenderRects = computed<RoiRenderRect[]>(() => {
+  const rois = suggestedRois.value
+  if (!rois || rois.length === 0) return []
+  const imgW = imageNatural.value.w || 800
+  const imgH = imageNatural.value.h || 600
+  const layouts = computeAllRoiLayouts(rois, imgW, imgH)
+  return rois.map((roi, idx) => {
+    const bbox = roi.bbox as [number, number, number, number]
+    const [x1, y1, x2, y2] = bbox
+    const w = Math.max(0, x2 - x1)
+    const h = Math.max(0, y2 - y1)
+    const sel = isRoiSelected(idx)
+    const layout = layouts[idx]!
+    return {
+      idx,
+      x: x1, y: y1, w, h,
+      category: roi.category,
+      ocrLabel: roi.label,
+      displayLabel: `A${idx + 1}`,
+      priority: roi.priority,
+      selected: sel,
+      stroke: sel ? roiStrokeForIndex(idx) : '#94a3b8',
+      dash: sel ? 'none' : '4 3',
+      ...layout,
+    }
+  })
+})
+
+/** #rrggbb → rgba(r, g, b, alpha) */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  if (!m) return `rgba(0,0,0,${alpha})`
+  return `rgba(${parseInt(m[1]!, 16)}, ${parseInt(m[2]!, 16)}, ${parseInt(m[3]!, 16)}, ${alpha})`
+}
 
 function formatHistoryTime(iso: string) {
   if (!iso || iso === '—') return '—'
@@ -1209,6 +1441,31 @@ function formatHistoryTime(iso: string) {
 function truncateName(name: string, max = 18) {
   if (name.length <= max) return name
   return `${name.slice(0, max - 1)}…`
+}
+
+/** 切换 suggested_rois 列表中某个 ROI 的勾选状态 */
+function toggleRoiIndex(idx: number) {
+  const arr = selectedRoiIndices.value
+  const pos = arr.indexOf(idx)
+  if (pos >= 0) {
+    arr.splice(pos, 1)
+  } else {
+    arr.push(idx)
+  }
+}
+
+function isRoiSelected(idx: number): boolean {
+  return selectedRoiIndices.value.includes(idx)
+}
+
+function selectAllRois() {
+  if (suggestedRois.value) {
+    selectedRoiIndices.value = suggestedRois.value.map((_, i) => i)
+  }
+}
+
+function deselectAllRois() {
+  selectedRoiIndices.value = []
 }
 
 function historyResultLabel(entry: DetectionHistoryEntry) {
@@ -1358,6 +1615,20 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
   ruleCheckLoading.value = false
   ruleCheckElapsed.value = null
   aiElapsed.value = null
+  // 同步 suggested_rois
+  const rc = entry.ruleCheck
+  if (rc?.suggested_rois && rc.suggested_rois.length > 0) {
+    suggestedRois.value = rc.suggested_rois
+    const highPrio = rc.suggested_rois
+      .map((roi, i) => (roi.priority <= 4 ? i : -1))
+      .filter((i) => i >= 0)
+    selectedRoiIndices.value = highPrio.length > 0
+      ? highPrio
+      : rc.suggested_rois.map((_, i) => i)
+  } else {
+    suggestedRois.value = null
+    selectedRoiIndices.value = []
+  }
   currentTaskFeedbackStatus.value = entry.feedbackStatus ?? null
   // 后端返回的 imageUrl 应为完整的资源路径（通常以 /ai-detection 开头），
   // 前端不得再统一 prepend 公共 /api/v1 前缀，避免生成错误路径。
@@ -1985,6 +2256,52 @@ onUnmounted(() => {
                   </text>
                 </g>
               </g>
+              <!-- 建议检测区域（suggested_rois）：框线 + 正交引导线 + 芯片标签 -->
+              <g v-for="rect in suggestedRoiRenderRects" :key="'sroi' + rect.idx">
+                <!-- 检测框 -->
+                <rect
+                  :x="rect.x" :y="rect.y" :width="rect.w" :height="rect.h"
+                  :fill="rect.selected ? hexToRgba(rect.stroke, 0.08) : 'rgba(148,163,184,0.05)'"
+                  :stroke="rect.stroke"
+                  :stroke-width="Math.max(1.5, overlayStroke * 0.9)"
+                  :stroke-dasharray="rect.dash"
+                  style="cursor: pointer; transition: fill 0.15s, stroke 0.15s; pointer-events: auto;"
+                  @click.stop="suggestedRois && toggleRoiIndex(rect.idx)"
+                />
+                <!-- 框边连接点 -->
+                <circle
+                  :cx="rect.x + rect.w" :cy="rect.y + rect.h / 2"
+                  :r="Math.max(2.5, overlayStroke * 0.28)"
+                  :fill="rect.stroke" stroke="none"
+                />
+                <!-- 正交引导线 -->
+                <polyline
+                  :points="rect.linePoints"
+                  :stroke="rect.stroke"
+                  :stroke-width="Math.max(0.8, overlayStroke * 0.45)"
+                  :stroke-dasharray="rect.selected ? 'none' : '3 2'"
+                  fill="none"
+                  style="pointer-events: none;"
+                />
+                <!-- 芯片标签：白色背景 + 彩色边框 + 圆角 -->
+                <rect
+                  :x="rect.cx" :y="rect.cy" :width="rect.cw" :height="rect.ch"
+                  rx="4" ry="4"
+                  :fill="rect.selected ? '#ffffff' : '#f8fafc'"
+                  :stroke="rect.stroke"
+                  :stroke-width="Math.max(1.2, overlayStroke * 0.4)"
+                  style="pointer-events: none;"
+                />
+                <text
+                  :x="rect.tx" :y="rect.ty"
+                  :text-anchor="rect.tx > imageNatural.w / 2 ? 'end' : 'start'"
+                  dominant-baseline="central"
+                  :font-size="Math.max(11, Math.min(14, imageNatural.w * 0.014))"
+                  :font-weight="700"
+                  :fill="rect.stroke"
+                  style="font-family: system-ui, -apple-system, sans-serif; pointer-events: none;"
+                >{{ rect.displayLabel }}</text>
+              </g>
               <rect
                 v-if="userBboxXYWH && !v3Payload"
                 :x="userBboxXYWH[0]"
@@ -2188,6 +2505,84 @@ onUnmounted(() => {
               </ul>
 
               <p v-else class="rule-check-no-findings">暂无检测数据</p>
+
+              <!-- 高压缩图片误报提示 -->
+              <p
+                v-if="ruleCheckUserView?.highCompressionNote"
+                class="rule-check-compression-note"
+              >{{ ruleCheckUserView.highCompressionNote }}</p>
+
+              <!-- 建议检测区域（suggested_rois） -->
+              <div
+                v-if="suggestedRois && suggestedRois.length > 0 && !ruleCheckPayload?.pixel_overlap"
+                class="suggested-rois-block"
+              >
+                <h4 class="suggested-rois-heading">建议检测区域</h4>
+                <p class="suggested-rois-hint">
+                  系统识别到以下可能被修改的区域，勾选或直接在图片上点击框线即可选中；选中后点击"检测选中区域"。
+                </p>
+                <p
+                  v-if="suggestedRois.every(r => r.priority >= 5)"
+                  class="suggested-rois-low-conf"
+                >⚠ 当前所有区域均为自动检测（准确度较低），建议人工判断后再勾选。</p>
+                <p
+                  v-if="suggestedRois.length > 0"
+                  class="suggested-rois-legend"
+                >
+                  <strong>金额候选</strong>：OCR 自动发现"含数字行"，未匹配到标签（金额/账号/时间/单号/姓名），准确度低于标签定位。
+                  <strong>P6</strong>：优先级 6（最低），1=金额 2=账号 3=时间 4=单号 5=姓名/昵称 6=金额候选（兜底）。
+                </p>
+                <div class="suggested-rois-toolbar">
+                  <button
+                    type="button"
+                    class="btn-text"
+                    :disabled="roiDetectBusy"
+                    @click="selectAllRois"
+                  >全选</button>
+                  <button
+                    type="button"
+                    class="btn-text"
+                    :disabled="roiDetectBusy"
+                    @click="deselectAllRois"
+                  >取消全选</button>
+                </div>
+                <ul class="suggested-rois-list">
+                  <li
+                    v-for="(roi, idx) in suggestedRois"
+                    :key="idx"
+                    class="suggested-rois-item"
+                    :class="{ 'suggested-rois-item--selected': isRoiSelected(idx) }"
+                    :title="roi.label"
+                  >
+                    <label class="suggested-rois-label">
+                      <input
+                        type="checkbox"
+                        :checked="isRoiSelected(idx)"
+                        :disabled="roiDetectBusy"
+                        @change="toggleRoiIndex(idx)"
+                      />
+                      <span
+                        class="roi-color-dot"
+                        :style="{ background: isRoiSelected(idx) ? roiStrokeForIndex(idx) : '#cbd5e1' }"
+                      ></span>
+                      <span class="roi-idx-label">A{{ idx + 1 }}</span>
+                      <span class="roi-category" :class="'roi-cat--' + (roi.priority <= 3 ? 'high' : 'normal')">
+                        {{ roi.category }}
+                      </span>
+                      <span class="roi-priority">P{{ roi.priority }}</span>
+                    </label>
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  :disabled="roiDetectBusy || selectedRoiIndices.length === 0"
+                  @click="runRoiDetect(files[selectedUploadIndex])"
+                >
+                  <span v-if="roiDetectBusy" class="btn-spinner" />
+                  {{ roiDetectBusy ? '检测中…' : '检测选中区域' }}
+                </button>
+              </div>
             </template>
           </div>
 
@@ -2786,7 +3181,60 @@ onUnmounted(() => {
           ×
         </button>
         <div ref="previewLightboxStageRef" class="preview-lightbox-stage">
-          <img :src="previewLightboxSrc" alt="" class="preview-lightbox-img" />
+          <div class="preview-lightbox-img-wrap">
+            <img
+              ref="lightboxImgRef"
+              :src="previewLightboxSrc"
+              alt=""
+              class="preview-lightbox-img"
+              @load="onLightboxImgLoad"
+            />
+            <svg
+              v-if="lightboxImgNatural.w && suggestedRoiRenderRects.length"
+              class="preview-lightbox-overlay"
+              :viewBox="`0 0 ${lightboxImgNatural.w} ${lightboxImgNatural.h}`"
+              preserveAspectRatio="xMidYMid meet"
+            >
+              <g v-for="rect in suggestedRoiRenderRects" :key="'lbsroi' + rect.idx">
+                <rect
+                  :x="rect.x" :y="rect.y" :width="rect.w" :height="rect.h"
+                  :fill="rect.selected ? hexToRgba(rect.stroke, 0.10) : 'rgba(148,163,184,0.06)'"
+                  :stroke="rect.stroke"
+                  :stroke-width="Math.max(2, lightboxImgNatural.w * 0.002)"
+                  :stroke-dasharray="rect.dash"
+                  style="pointer-events: none;"
+                />
+                <circle
+                  :cx="rect.x + rect.w" :cy="rect.y + rect.h / 2"
+                  :r="Math.max(3, lightboxImgNatural.w * 0.003)"
+                  :fill="rect.stroke" stroke="none"
+                />
+                <polyline
+                  :points="rect.linePoints"
+                  :stroke="rect.stroke"
+                  :stroke-width="Math.max(1, lightboxImgNatural.w * 0.0008)"
+                  :stroke-dasharray="rect.selected ? 'none' : '3 2'"
+                  fill="none"
+                />
+                <rect
+                  :x="rect.cx" :y="rect.cy" :width="rect.cw" :height="rect.ch"
+                  rx="5" ry="5"
+                  :fill="rect.selected ? '#ffffff' : '#f8fafc'"
+                  :stroke="rect.stroke"
+                  :stroke-width="Math.max(1.5, lightboxImgNatural.w * 0.0006)"
+                />
+                <text
+                  :x="rect.tx" :y="rect.ty"
+                  :text-anchor="rect.tx > lightboxImgNatural.w / 2 ? 'end' : 'start'"
+                  dominant-baseline="central"
+                  :font-size="Math.max(13, Math.min(18, lightboxImgNatural.w * 0.016))"
+                  :font-weight="700"
+                  :fill="rect.stroke"
+                  style="font-family: system-ui, -apple-system, sans-serif; pointer-events: none;"
+                >{{ rect.displayLabel }}</text>
+              </g>
+            </svg>
+          </div>
         </div>
         <p class="preview-lightbox-hint">点击背景或 × 关闭，按 Esc 退出</p>
       </div>
@@ -4711,6 +5159,149 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+/* ===== Suggested ROIs（建议检测区域） ===== */
+.suggested-rois-block {
+  margin-top: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  background: #fafbfc;
+}
+
+.suggested-rois-heading {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.suggested-rois-hint {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.suggested-rois-low-conf {
+  font-size: 0.75rem;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 0.35rem 0.55rem;
+  border-radius: 4px;
+  margin-bottom: 0.4rem;
+  line-height: 1.45;
+}
+
+.suggested-rois-legend {
+  font-size: 0.72rem;
+  color: #64748b;
+  line-height: 1.55;
+  margin: 0 0 0.6rem;
+  padding: 0.35rem 0.55rem;
+  background: #f8fafc;
+  border-radius: 4px;
+  border-left: 3px solid #e2e8f0;
+}
+
+.suggested-rois-list {
+  margin: 0 0 0.65rem;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.suggested-rois-item {
+  padding: 0.3rem 0 0.3rem 0.5rem;
+  border-left: 3px solid transparent;
+  border-radius: 0 4px 4px 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.suggested-rois-item--selected {
+  border-left-color: #2563eb;
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.suggested-rois-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.suggested-rois-label input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--brand);
+}
+
+.roi-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.roi-category {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.roi-cat--high {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.roi-cat--normal {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.roi-idx-label {
+  font-weight: 700;
+  color: #2563eb;
+  font-size: 0.82rem;
+  min-width: 2.2em;
+  flex-shrink: 0;
+}
+
+.roi-label {
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roi-priority {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+/* ===== 高压缩图片误报提示 ===== */
+.rule-check-compression-note {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.7rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  color: #92400e;
+  line-height: 1.45;
+}
+
 .multi-scroll {
   max-height: min(26vh, 220px);
   overflow-y: auto;
@@ -4859,6 +5450,19 @@ onUnmounted(() => {
   overflow: auto;
   border-radius: 8px;
   display: block;
+}
+
+.preview-lightbox-img-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  min-width: 100%;
+}
+
+.preview-lightbox-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .preview-lightbox-img {

@@ -1,8 +1,8 @@
 import type {
   RuleChecksData,
   RuleChecksPixelOverlap,
-  RuleChecksSemantic,
   RuleChecksTimestamp,
+  SuggestedRoi,
 } from './api/detect'
 
 export type RuleCheckFindingStatus = 'ok' | 'warn' | 'bad'
@@ -25,6 +25,12 @@ export type RuleCheckUserView = {
   summary: string
   findings: RuleCheckUserFinding[]
   timeFacts: RuleCheckTimeFact[]
+  /** 不传 bbox 时后端返回的建议检测区域 */
+  suggestedRois: SuggestedRoi[] | null
+  /** 像素重叠检测结果是否来自手动框选 */
+  pixelOverlapSource: 'manual_bbox' | null
+  /** 高压缩图片可能误报的提示 */
+  highCompressionNote?: string
 }
 
 function joinUnique(parts: string[]): string {
@@ -80,7 +86,6 @@ export function makeFinding(
   block:
     | (RuleChecksPixelOverlap & Record<string, unknown>)
     | (RuleChecksTimestamp & Record<string, unknown>)
-    | (RuleChecksSemantic & Record<string, unknown>)
     | null
     | undefined,
 ): RuleCheckUserFinding | null {
@@ -123,36 +128,6 @@ export function makeFinding(
       details.push({ label: '文本拼接分数', value: `${(Number(metrics.text_splice_score) * 100).toFixed(1)}%` })
     }
   }
-  if ('auto_scan_regions' in block && Array.isArray(block.auto_scan_regions) && block.auto_scan_regions.length > 0) {
-    details.push({ label: '自动扫描区域数', value: String(block.auto_scan_regions.length) })
-  }
-
-  // 提取 semantic 的详细信息
-  if ('risk' in block && block.risk != null && typeof block.risk === 'number') {
-    details.push({ label: '风险分数', value: `${(block.risk * 100).toFixed(1)}%` })
-  }
-  if ('semantic_check' in block && block.semantic_check && typeof block.semantic_check === 'object') {
-    const sc = block.semantic_check as Record<string, unknown>
-    if (sc.account_masks && typeof sc.account_masks === 'object') {
-      const am = sc.account_masks as Record<string, unknown>
-      if (am.anomaly === true) {
-        details.push({ label: '账号脱敏', value: '异常' })
-      }
-      if (typeof am.message === 'string' && am.message.trim()) {
-        details.push({ label: '账号脱敏说明', value: am.message.trim() })
-      }
-    }
-    if (sc.synthetic && typeof sc.synthetic === 'object') {
-      const sy = sc.synthetic as Record<string, unknown>
-      if (sy.suspicious === true) {
-        details.push({ label: '合成检测', value: '可疑' })
-      }
-      if (Array.isArray(sy.signals) && sy.signals.length > 0) {
-        details.push({ label: '合成信号', value: sy.signals.map(String).join('、') })
-      }
-    }
-  }
-
   // 提取 timestamp 的详细信息
   if ('timestamp_check' in block && block.timestamp_check && typeof block.timestamp_check === 'object') {
     const tc = block.timestamp_check as Record<string, unknown>
@@ -198,6 +173,8 @@ export function buildRuleCheckUserView(
       summary: data.reason?.trim() || '规则检测未执行或结果不可用',
       findings: [],
       timeFacts: [],
+      suggestedRois: null,
+      pixelOverlapSource: null,
     }
   }
 
@@ -240,10 +217,6 @@ export function buildRuleCheckUserView(
         details.push({ label: '文本拼接分数', value: `${(Number(metrics.text_splice_score) * 100).toFixed(1)}%` })
       }
     }
-    if (Array.isArray(block.auto_scan_regions) && block.auto_scan_regions.length > 0) {
-      details.push({ label: '自动扫描区域数', value: String(block.auto_scan_regions.length) })
-    }
-
     findings.push({
       status: readBlockStatus(block),
       title: '拼接/贴图痕迹',
@@ -286,31 +259,19 @@ export function buildRuleCheckUserView(
     })
   }
 
-  // 语义检测
-  if (data.semantic) {
-    const block = data.semantic as RuleChecksSemantic & Record<string, unknown>
-    const text = block.message || readBlockText(block) || '暂无该项检测数据'
-    const details: { label: string; value: string }[] = []
-
-    // 提取详细信息
-    if (block.risk != null && typeof block.risk === 'number') {
-      details.push({ label: '风险分数', value: `${(block.risk * 100).toFixed(1)}%` })
-    }
-    if (Array.isArray(block.anomalies) && block.anomalies.length > 0) {
-      details.push({ label: '异常类型', value: block.anomalies.join('、') })
-    }
-
-    findings.push({
-      status: readBlockStatus(block),
-      title: '语义（金额/排版/EXIF）',
-      text,
-      details: details.length > 0 ? details : undefined,
-    })
-  }
+  // 高压缩图片提示
+  const highCompressionNote = data.pixel_overlap
+    ? (data.pixel_overlap as Record<string, unknown>).high_compression === true
+      ? '⚠ 该图片压缩率较高，像素检测结果可能误报，请结合其他维度综合判断'
+      : undefined
+    : undefined
 
   return {
     summary: data.reason?.trim() || '—',
     findings,
     timeFacts: [],
+    suggestedRois: data.suggested_rois ?? null,
+    pixelOverlapSource: data.pixel_overlap_source ?? null,
+    highCompressionNote,
   }
 }
