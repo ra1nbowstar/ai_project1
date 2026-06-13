@@ -2328,7 +2328,7 @@ onUnmounted(() => {
                 }}</span>
               </button>
               <div
-                v-if="h.feedbackStatus && h.taskId && feedbackByTaskId.get(h.taskId)"
+                v-if="h.feedbackStatus"
                 class="history-correction"
               >
                 <div class="history-correction-divider">
@@ -2342,7 +2342,7 @@ onUnmounted(() => {
                 <span class="history-correction-icon">{{
                   h.feedbackStatus === 'correct' ? '✓' : h.feedbackStatus === 'wrong' ? '✗' : '—'
                 }}</span>
-                <span class="history-correction-time">{{
+                <span v-if="h.taskId && feedbackByTaskId.get(h.taskId)" class="history-correction-time">{{
                   correctionTimestamp(feedbackByTaskId.get(h.taskId!))
                 }}</span>
               </div>

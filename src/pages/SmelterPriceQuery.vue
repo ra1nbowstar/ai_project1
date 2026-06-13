@@ -337,7 +337,7 @@ function normalizeAiPredictionState(status: string): AiPredictionState {
 const aiPredictionButtonText = computed(() => {
   if (todayPriceChecking.value) return '检查价格中...'
   if (aiPredictionLoading.value) return '预测中...'
-  return '开始预测'
+  return '批量预跑AI预测数据'
 })
 
 function todayDateString(): string {

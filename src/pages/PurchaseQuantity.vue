@@ -673,8 +673,11 @@ import { fetchDeliveryHistoryDimensionOptions } from '../api/dimensionOptions'
 import { fetchCategoryMapping } from '../api/tlApi'
 import {
   fetchAllPredictResults,
+  fetchPredictRowsFromPost,
   aggregateChartFromResults,
-  triggerPrediction,
+  resolveForecastDateAxis,
+  localTodayYmd,
+  type PredictFilterParams,
   type PredictResultRow,
 } from '../api/predictApi'
 import ForecastBasisPanel from '../components/ForecastBasisPanel.vue'
@@ -744,11 +747,14 @@ const chartEmptyHint = computed(() =>
     : '请先完成筛选条件并点击「查询」获取预测数据。',
 )
 
-const dateMin = computed(() => new Date().toISOString().slice(0, 10))
+const dateMin = computed(() => localTodayYmd())
 const dateMax = computed(() => {
   const d = new Date()
   d.setDate(d.getDate() + 15)
-  return d.toISOString().slice(0, 10)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 })
 
 function getForecastFilterValidationError(): string | null {
@@ -1083,7 +1089,12 @@ function defaultForecastDateRange(): { startDate: string; endDate: string } {
   const start = new Date()
   const end = new Date(start)
   end.setDate(end.getDate() + 15)
-  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  const fmt = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
   return { startDate: fmt(start), endDate: fmt(end) }
 }
 
@@ -1756,8 +1767,8 @@ const focusDetailVarietyInput = () => {
 }
 
 // ==================== 构建筛选参数 ====================
-function buildForecastFilterParams(): Record<string, any> {
-  const params: Record<string, any> = {}
+function buildForecastFilterParams(): PredictFilterParams {
+  const params: PredictFilterParams = {}
   if (forecastActiveTab.value === 'detail') {
     const f = detailTabFilters.value
     if (f.startDate) params.date_from = f.startDate
@@ -1818,16 +1829,28 @@ function smelterKey(s: string | null | undefined) {
   return t ? t : '未知'
 }
 
-/** 从 v2 明细行重建透视表（客户端聚合 expectedShipment） */
-function rebuildForecastPivotFromResults(rows: PredictResultRow[]) {
-  const dates = [...new Set(rows.map((r) => r.targetDate))].sort()
+function forecastDateRangeFromParams(base: Record<string, unknown>) {
+  const from = base.date_from
+  const to = base.date_to
+  return {
+    dateFrom: typeof from === 'string' ? from : undefined,
+    dateTo: typeof to === 'string' ? to : undefined,
+  }
+}
+
+/** 从 v2 明细行重建透视表（与汇总折线图共用日期轴与按日求和） */
+function rebuildForecastPivotFromResults(
+  rows: PredictResultRow[],
+  rangeOpts?: { dateFrom?: string; dateTo?: string },
+) {
+  const dates = resolveForecastDateAxis(rows, rangeOpts)
   forecastDateColumns.value = dates
 
   const cellFor = (dateMap: Map<string, number>, date: string): ForecastPivotCell => {
-    const weight = dateMap.get(date)
+    const weight = dateMap.get(date) ?? 0
     return {
-      text: weight !== undefined ? weight.toFixed(2) : '—',
-      isPlaceholder: weight === undefined,
+      text: weight.toFixed(2),
+      isPlaceholder: false,
     }
   }
 
@@ -1885,43 +1908,54 @@ function parsePredictError(e: unknown): string {
   )
 }
 
+/** 预测依据：仍从 GET /predict/results 取综合分析（与改前一致） */
+async function loadChartSummaryFromResults(base: PredictFilterParams) {
+  try {
+    const resultsRows = await fetchAllPredictResults(base)
+    chartSummaryText.value =
+      resultsRows.find((r) => (r.comprehensiveAnalysis || '').trim())?.comprehensiveAnalysis || ''
+  } catch (e) {
+    console.warn('读取预测依据失败:', e)
+    chartSummaryText.value = ''
+  }
+}
+
 // ==================== 从 v2 明细拉取并填充 ====================
 async function fetchDetailData() {
   loading.value = true
   const base = buildForecastFilterParams()
+  const rangeOpts = forecastDateRangeFromParams(base)
 
   try {
-    // 按仓库标签页：自动触发预测（后端从 DB 加载数据）
+    let chartRows: PredictResultRow[] = []
+
     if (forecastActiveTab.value === 'warehouse' && forecastWhSelectedWarehouses.value) {
       const warehouse = forecastWhSelectedWarehouses.value
-      const smelter = forecastWhSelectedSmelters.value.length > 0 ? forecastWhSelectedSmelters.value[0] : undefined
-      try {
-        await triggerPrediction({
-          warehouse,
-          smelter,
-          startDate: forecastWhFilters.value.startDate,
-          endDate: forecastWhFilters.value.endDate,
-        })
-      } catch (triggerErr) {
-        console.warn('触发预测失败，尝试读取已有结果:', triggerErr)
-      }
+      const smelter =
+        forecastWhSelectedSmelters.value.length > 0 ? forecastWhSelectedSmelters.value[0] : undefined
+      chartRows = await fetchPredictRowsFromPost({
+        warehouse,
+        smelter,
+        startDate: forecastWhFilters.value.startDate,
+        endDate: forecastWhFilters.value.endDate,
+      })
+      await loadChartSummaryFromResults(base)
+    } else {
+      chartRows = await fetchAllPredictResults(base)
+      chartSummaryText.value =
+        chartRows.find((r) => (r.comprehensiveAnalysis || '').trim())?.comprehensiveAnalysis || ''
     }
 
-    const rows = await fetchAllPredictResults(base)
-    detailRows.value = rows
+    detailRows.value = chartRows
 
-    // 客户端图表聚合（替代 /forecast/chart）
-    const chart = aggregateChartFromResults(rows)
+    const chart = aggregateChartFromResults(chartRows, rangeOpts)
     chartDates.value = chart.dates
     chartTotalByDate.value = chart.totalByDate
-
-    // 汇总预测依据（取首条有综合分析的行，避免首行恰好缺少分析字段）
-    chartSummaryText.value = rows.find((r) => (r.comprehensiveAnalysis || '').trim())?.comprehensiveAnalysis || ''
 
     await nextTick()
     drawSummaryChart()
 
-    rebuildForecastPivotFromResults(rows)
+    rebuildForecastPivotFromResults(chartRows, rangeOpts)
     detailTablePage.value = 1
   } catch (error: unknown) {
     console.error('获取预测明细失败', error)
