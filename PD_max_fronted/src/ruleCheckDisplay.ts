@@ -1,9 +1,21 @@
 import type {
   RuleChecksData,
   RuleChecksPixelOverlap,
-  RuleChecksSemantic,
   RuleChecksTimestamp,
+  SuggestedRoi,
 } from './api/detect'
+
+/** 规则检测语义块（部分后端响应含 semantic，detect 类型未单独导出） */
+export type RuleChecksSemantic = {
+  passed?: boolean
+  alert?: boolean
+  hard_tamper?: boolean
+  message?: string
+  reasons?: string[]
+  anomalies?: string[]
+  risk?: number
+  [key: string]: unknown
+}
 
 export type RuleCheckFindingStatus = 'ok' | 'warn' | 'bad'
 
@@ -26,6 +38,12 @@ export type RuleCheckUserView = {
   summary: string
   findings: RuleCheckUserFinding[]
   timeFacts: RuleCheckTimeFact[]
+  /** 不传 bbox 时后端返回的建议检测区域 */
+  suggestedRois: SuggestedRoi[] | null
+  /** 像素重叠检测结果是否来自手动框选 */
+  pixelOverlapSource: 'manual_bbox' | null
+  /** 高压缩图片可能误报的提示 */
+  highCompressionNote?: string
 }
 
 type RuleBlock =
@@ -221,7 +239,6 @@ export function makeFinding(
   block:
     | (RuleChecksPixelOverlap & Record<string, unknown>)
     | (RuleChecksTimestamp & Record<string, unknown>)
-    | (RuleChecksSemantic & Record<string, unknown>)
     | null
     | undefined,
 ): RuleCheckUserFinding | null {
@@ -229,7 +246,13 @@ export function makeFinding(
   const text = readBlockText(block)
   if (!text && block.passed == null && block.hard_tamper == null && block.alert == null) return null
   const title = readBlockLabel(block) || '规则检测项'
-  return buildFinding(title, block, [])
+  const details: { label: string; value: string }[] = []
+  if ('pixel_overlap_score' in block) {
+    details.push(...buildPixelDetails(block as RuleChecksPixelOverlap & Record<string, unknown>))
+  } else if ('timestamp_check' in block || 'business_mismatch' in block) {
+    details.push(...buildTimestampDetails(block as RuleChecksTimestamp & Record<string, unknown>))
+  }
+  return buildFinding(title, block, details)
 }
 
 export function ruleCheckVerdict(data: RuleChecksData | null | undefined): {
@@ -240,7 +263,8 @@ export function ruleCheckVerdict(data: RuleChecksData | null | undefined): {
   if (data.available === false) return { label: '暂无', pillClass: '' }
   const st = data.status?.trim()
   if (st) return { label: st, pillClass: st }
-  const blocks = [data.pixel_overlap, data.timestamp, data.semantic].filter(Boolean) as RuleBlock[]
+  const semantic = (data as RuleChecksData & { semantic?: RuleChecksSemantic | null }).semantic
+  const blocks = [data.pixel_overlap, data.timestamp, semantic].filter(Boolean) as RuleBlock[]
   if (blocks.some((block) => readBlockStatus(block) === 'bad')) return { label: '有问题', pillClass: '篡改' }
   if (blocks.some((block) => readBlockStatus(block) === 'warn')) return { label: '需复核', pillClass: '可疑' }
   if (blocks.length > 0) return { label: '正常', pillClass: '正常' }
@@ -274,6 +298,8 @@ export function buildRuleCheckUserView(
       summary: data.reason?.trim() || '规则检测未执行或结果不可用',
       findings: [],
       timeFacts: [],
+      suggestedRois: null,
+      pixelOverlapSource: null,
     }
   }
 
@@ -289,14 +315,24 @@ export function buildRuleCheckUserView(
     findings.push(buildFinding('时间与单据核对', block, buildTimestampDetails(block)))
   }
 
-  if (data.semantic) {
-    const block = data.semantic as RuleChecksSemantic & Record<string, unknown>
+  const dataWithSemantic = data as RuleChecksData & { semantic?: RuleChecksSemantic | null }
+  if (dataWithSemantic.semantic) {
+    const block = dataWithSemantic.semantic as RuleChecksSemantic & Record<string, unknown>
     findings.push(buildFinding('金额、排版与图片信息', block, buildSemanticDetails(block)))
   }
+
+  const highCompressionNote = data.pixel_overlap
+    ? (data.pixel_overlap as Record<string, unknown>).high_compression === true
+      ? '⚠ 该图片压缩率较高，像素检测结果可能误报，请结合其他维度综合判断'
+      : undefined
+    : undefined
 
   return {
     summary: buildSummary(data, findings),
     findings,
     timeFacts: [],
+    suggestedRois: data.suggested_rois ?? null,
+    pixelOverlapSource: data.pixel_overlap_source ?? null,
+    highCompressionNote,
   }
 }

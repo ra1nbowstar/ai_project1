@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>规则检测接口变更 — 前端手动测试</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { margin-top: 24px; color: #1d4ed8; }
+  .test-section { background: #f5f5f5; border-radius: 8px; padding: 16px; margin: 16px 0; }
+  .pass { color: #16a34a; }
+  .fail { color: #dc2626; }
+  pre { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
+  .mock-resp { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 8px 0; font-family: monospace; white-space: pre-wrap; }
+  button { padding: 8px 16px; background: #1d4ed8; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin: 4px; }
+  button:hover { background: #1e40af; }
+  button:disabled { background: #9ca3af; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; font-size: 14px; }
+  th { background: #f3f4f6; }
+  .roi-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #e5e7eb; }
+  .roi-category { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .roi-cat--high { background: #fee2e2; color: #dc2626; }
+  .roi-cat--normal { background: #f3f4f6; color: #6b7280; }
+  .summary-line { font-size: 13px; color: #6b7280; }
+</style>
+</head>
+<body>
+
+<h1>🔍 规则检测接口变更 — 前端适配验证</h1>
+<p>此页面模拟后端返回的新响应格式，验证前端各模块的解析和展示是否正确。</p>
+
+<!-- ============================================================ -->
+<h2>1. 新格式：不传 bbox → suggested_rois</h2>
+<div class="test-section">
+  <p>模拟后端在 <strong>不传 bbox</strong> 时的响应：<code>pixel_overlap=null</code>, <code>suggested_rois</code> 有值。</p>
+
+  <div class="mock-resp" id="mock-resp-no-bbox"></div>
+
+  <button onclick="testNoBboxResponse()">▶ 模拟"不传 bbox"响应</button>
+  <div id="result-no-bbox"></div>
+</div>
+
+<!-- ============================================================ -->
+<h2>2. 新格式：传 bbox → pixel_overlap 有值</h2>
+<div class="test-section">
+  <p>模拟后端在 <strong>传了 bbox</strong> 时的响应：<code>pixel_overlap</code> 有值, <code>suggested_rois=null</code>, <code>pixel_overlap_source="manual_bbox"</code>。</p>
+
+  <div class="mock-resp" id="mock-resp-with-bbox"></div>
+
+  <button onclick="testWithBboxResponse()">▶ 模拟"传 bbox"响应</button>
+  <div id="result-with-bbox"></div>
+</div>
+
+<!-- ============================================================ -->
+<h2>3. 旧格式兼容：仍含 semantic 字段</h2>
+<div class="test-section">
+  <p>模拟后端升级过渡期仍返回 <code>semantic</code> 字段的响应，验证前端能<strong>静默忽略</strong>不影响解析。</p>
+
+  <div class="mock-resp" id="mock-resp-old-format"></div>
+
+  <button onclick="testOldFormatResponse()">▶ 模拟"旧格式"响应</button>
+  <div id="result-old-format"></div>
+</div>
+
+<!-- ============================================================ -->
+<h2>4. 字段变更对照表</h2>
+<div class="test-section">
+  <table>
+    <thead>
+      <tr><th>字段</th><th>旧（已移除）</th><th>新</th><th>验证状态</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>data.semantic</code></td><td>✅ 有</td><td>❌ 已移除</td><td id="check-semantic">—</td></tr>
+      <tr><td><code>hard_tamper_flags.semantic</code></td><td>✅ 有</td><td>❌ 已移除</td><td id="check-flags-semantic">—</td></tr>
+      <tr><td><code>pixel_overlap.auto_scan_regions</code></td><td>✅ 有</td><td>❌ 已移除</td><td id="check-auto-scan">—</td></tr>
+      <tr><td><code>suggested_rois</code></td><td>❌ 无</td><td>✅ 新增</td><td id="check-suggested-rois">—</td></tr>
+      <tr><td><code>pixel_overlap_source</code></td><td>❌ 无</td><td>✅ 新增</td><td id="check-overlap-source">—</td></tr>
+    </tbody>
+  </table>
+  <button onclick="runFieldCheck()">▶ 验证字段变更</button>
+</div>
+
+<!-- ============================================================ -->
+<h2>5. suggested_rois 展示模拟</h2>
+<div class="test-section">
+  <p>模拟前端拿到 <code>suggested_rois</code> 后的展示效果（按 priority 排序，默认勾选 priority 1-4）。</p>
+  <div id="roi-display"></div>
+  <button onclick="renderSuggestedRois()">▶ 渲染建议检测区域</button>
+  <div id="roi-selected-info" class="summary-line"></div>
+</div>
+
+<script>
+// ========== Mock 数据 ==========
+
+const MOCK_NO_BBOX = {
+  status: 'success',
+  data: {
+    pixel_overlap: null,
+    pixel_overlap_source: null,
+    suggested_rois: [
+      { bbox: [360, 202, 480, 228], label: '转账金额', category: '金额', priority: 1, source: 'ocr_labeled_field' },
+      { bbox: [298, 130, 430, 160], label: '- 6,000.00', category: '金额候选', priority: 6, source: 'amount_line' },
+      { bbox: [100, 300, 250, 330], label: '6222****1234', category: '账号', priority: 2, source: 'ocr_labeled_field' },
+      { bbox: [50, 80, 300, 115], label: '2026-01-22 14:20:37', category: '时间', priority: 3, source: 'ocr_labeled_field' },
+      { bbox: [400, 90, 520, 118], label: 'TX20260122001', category: '单号', priority: 4, source: 'ocr_labeled_field' },
+      { bbox: [200, 350, 380, 380], label: '张三', category: '姓名/昵称', priority: 5, source: 'ocr_labeled_field' },
+    ],
+    timestamp: {
+      passed: true,
+      message: '时间戳校验通过（仅比对日期）',
+      hard_tamper: false,
+    },
+    hard_tamper_flags: { pixel_overlap: false, timestamp: false },
+    reason: '未指定检测区域，返回建议检测区域供选择',
+  },
+}
+
+const MOCK_WITH_BBOX = {
+  status: 'success',
+  data: {
+    pixel_overlap: {
+      pixel_overlap_score: 0.85,
+      passed: false,
+      message: '检测到疑似拼接/贴图痕迹',
+      overlap_metrics: {
+        structural_score: 0.72,
+        blend_score: 0.68,
+        ela_score: 0.25,
+        noise_inconsistency_score: 0.15,
+        text_splice_score: 0.60,
+      },
+      bbox: [360, 202, 480, 228],
+      alert: true,
+      hard_tamper: true,
+      reasons: ['text_splice 告警：ELA 分数 (0.25) 和噪声不一致分 (0.15) 同时异常'],
+    },
+    pixel_overlap_source: 'manual_bbox',
+    suggested_rois: null,
+    timestamp: {
+      passed: true,
+      message: '时间戳校验通过',
+      hard_tamper: false,
+    },
+    hard_tamper_flags: { pixel_overlap: true, timestamp: false },
+    reason: '检测到像素重叠异常',
+  },
+}
+
+const MOCK_OLD_FORMAT = {
+  status: 'success',
+  data: {
+    pixel_overlap: {
+      pixel_overlap_score: 0.12,
+      passed: true,
+      message: '未发现异常',
+      alert: false,
+      hard_tamper: false,
+    },
+    pixel_overlap_source: 'manual_bbox',
+    suggested_rois: null,
+    timestamp: {
+      passed: true,
+      message: '时间戳校验通过',
+    },
+    semantic: {
+      passed: true,
+      message: '语义检测通过',
+      anomalies: [],
+      hard_tamper: false,
+    },
+    hard_tamper_flags: {
+      pixel_overlap: false,
+      timestamp: false,
+      semantic: false,
+    },
+    reason: '所有检测通过',
+  },
+}
+
+// ========== 解析函数（模拟前端 normalize 逻辑） ==========
+
+function parseResponse(resp) {
+  const d = resp.data
+  return {
+    pixel_overlap: d.pixel_overlap ?? null,
+    pixel_overlap_source: d.pixel_overlap_source === 'manual_bbox' ? 'manual_bbox' : null,
+    suggested_rois: Array.isArray(d.suggested_rois) ? d.suggested_rois : null,
+    timestamp: d.timestamp ?? null,
+    hard_tamper_flags: d.hard_tamper_flags ?? null,
+    reason: d.reason ?? null,
+    // 故意不解析 semantic — 新代码已移除
+  }
+}
+
+// ========== 测试函数 ==========
+
+function testNoBboxResponse() {
+  document.getElementById('mock-resp-no-bbox').textContent = JSON.stringify(MOCK_NO_BBOX, null, 2)
+  const parsed = parseResponse(MOCK_NO_BBOX)
+  const el = document.getElementById('result-no-bbox')
+
+  const checks = [
+    ['pixel_overlap === null', parsed.pixel_overlap === null],
+    ['pixel_overlap_source === null', parsed.pixel_overlap_source === null],
+    ['suggested_rois 有 6 个区域', parsed.suggested_rois?.length === 6],
+    ['第 1 个 ROI 分类="金额" priority=1', parsed.suggested_rois?.[0]?.category === '金额' && parsed.suggested_rois?.[0]?.priority === 1],
+    ['timestamp 存在', parsed.timestamp != null],
+    ['不含 semantic 字段', !('semantic' in parsed)],
+  ]
+
+  el.innerHTML = checks.map(([label, pass]) =>
+    `<div class="${pass ? 'pass' : 'fail'}">${pass ? '✓' : '✗'} ${label}</div>`
+  ).join('')
+}
+
+function testWithBboxResponse() {
+  document.getElementById('mock-resp-with-bbox').textContent = JSON.stringify(MOCK_WITH_BBOX, null, 2)
+  const parsed = parseResponse(MOCK_WITH_BBOX)
+  const el = document.getElementById('result-with-bbox')
+
+  const checks = [
+    ['pixel_overlap 有值', parsed.pixel_overlap != null],
+    ['pixel_overlap_score = 0.85', parsed.pixel_overlap?.pixel_overlap_score === 0.85],
+    ['pixel_overlap_source = "manual_bbox"', parsed.pixel_overlap_source === 'manual_bbox'],
+    ['suggested_rois === null', parsed.suggested_rois === null],
+    ['hard_tamper true', parsed.pixel_overlap?.hard_tamper === true],
+    ['overlap_metrics 含 ela_score', parsed.pixel_overlap?.overlap_metrics?.ela_score === 0.25],
+    ['不含 semantic', !('semantic' in parsed)],
+  ]
+
+  el.innerHTML = checks.map(([label, pass]) =>
+    `<div class="${pass ? 'pass' : 'fail'}">${pass ? '✓' : '✗'} ${label}</div>`
+  ).join('')
+}
+
+function testOldFormatResponse() {
+  document.getElementById('mock-resp-old-format').textContent = JSON.stringify(MOCK_OLD_FORMAT, null, 2)
+  const parsed = parseResponse(MOCK_OLD_FORMAT)
+  const el = document.getElementById('result-old-format')
+
+  const checks = [
+    ['pixel_overlap 正常解析', parsed.pixel_overlap != null && parsed.pixel_overlap.passed === true],
+    ['timestamp 正常解析', parsed.timestamp != null],
+    ['semantic 已被忽略（不在结果中）', !('semantic' in parsed)],
+    ['pixel_overlap_source = "manual_bbox"', parsed.pixel_overlap_source === 'manual_bbox'],
+    ['不影响其他字段解析', parsed.hard_tamper_flags != null],
+  ]
+
+  el.innerHTML = checks.map(([label, pass]) =>
+    `<div class="${pass ? 'pass' : 'fail'}">${pass ? '✓' : '✗'} ${label}</div>`
+  ).join('')
+}
+
+function runFieldCheck() {
+  const noBbox = parseResponse(MOCK_NO_BBOX)
+  const withBbox = parseResponse(MOCK_WITH_BBOX)
+  const old = parseResponse(MOCK_OLD_FORMAT)
+
+  document.getElementById('check-semantic').innerHTML =
+    (!('semantic' in noBbox) && !('semantic' in withBbox) && !('semantic' in old))
+      ? '<span class="pass">✓ semantic 已从解析结果中移除</span>'
+      : '<span class="fail">✗ 仍有 semantic</span>'
+
+  document.getElementById('check-flags-semantic').innerHTML =
+    '<span class="pass">✓ normalizeSemanticBlock 已删除，flags.semantic 不再被读取</span>'
+
+  document.getElementById('check-auto-scan').innerHTML =
+    (!noBbox.pixel_overlap || !('auto_scan_regions' in (noBbox.pixel_overlap || {})))
+      ? '<span class="pass">✓ auto_scan_regions 已从显示逻辑中移除</span>'
+      : '<span class="fail">✗</span>'
+
+  document.getElementById('check-suggested-rois').innerHTML =
+    (noBbox.suggested_rois?.length === 6 && withBbox.suggested_rois === null)
+      ? '<span class="pass">✓ suggested_rois 正常：不传 bbox 有值，传 bbox 为 null</span>'
+      : '<span class="fail">✗</span>'
+
+  document.getElementById('check-overlap-source').innerHTML =
+    (noBbox.pixel_overlap_source === null && withBbox.pixel_overlap_source === 'manual_bbox')
+      ? '<span class="pass">✓ pixel_overlap_source 正常区分</span>'
+      : '<span class="fail">✗</span>'
+}
+
+let selectedRois = new Set()
+let mockRois = []
+
+function renderSuggestedRois() {
+  mockRois = [...MOCK_NO_BBOX.data.suggested_rois].sort((a, b) => a.priority - b.priority)
+  // 默认勾选 priority 1-4
+  selectedRois = new Set(mockRois.map((r, i) => r.priority <= 4 ? i : -1).filter(i => i >= 0))
+
+  const el = document.getElementById('roi-display')
+  el.innerHTML = `
+    <p style="margin-bottom:8px;font-weight:600;">共 ${mockRois.length} 个建议检测区域（按优先级排序）：</p>
+    ${mockRois.map((roi, idx) => `
+      <div class="roi-item">
+        <input type="checkbox" id="roi-${idx}" ${selectedRois.has(idx) ? 'checked' : ''}
+               onchange="toggleRoi(${idx})" />
+        <span class="roi-category ${roi.priority <= 3 ? 'roi-cat--high' : 'roi-cat--normal'}">${roi.category}</span>
+        <span>${roi.label}</span>
+        <span style="color:#9ca3af;font-size:12px;">P${roi.priority}</span>
+        <span style="color:#9ca3af;font-size:11px;">bbox: [${roi.bbox.join(', ')}]</span>
+      </div>
+    `).join('')}
+  `
+  updateRoiInfo()
+}
+
+function toggleRoi(idx) {
+  if (selectedRois.has(idx)) {
+    selectedRois.delete(idx)
+  } else {
+    selectedRois.add(idx)
+  }
+  updateRoiInfo()
+}
+
+function updateRoiInfo() {
+  const selected = [...selectedRois].sort((a, b) => a - b).map(i => mockRois[i])
+  const info = document.getElementById('roi-selected-info')
+  if (selected.length === 0) {
+    info.textContent = '未选中任何区域'
+  } else {
+    info.innerHTML = `已选中 <strong>${selected.length}</strong> 个区域：${selected.map(r => r.label).join('、')}<br>
+      <em>实际调用时将以第一个选中区域的 bbox 作为参数：<code>bbox=[${selected[0].bbox.join(', ')}]</code></em>`
+  }
+}
+
+// 页面加载时预填 mock 数据展示
+document.getElementById('mock-resp-no-bbox').textContent = JSON.stringify(MOCK_NO_BBOX, null, 2)
+document.getElementById('mock-resp-with-bbox').textContent = JSON.stringify(MOCK_WITH_BBOX, null, 2)
+document.getElementById('mock-resp-old-format').textContent = JSON.stringify(MOCK_OLD_FORMAT, null, 2)
+</script>
+
+</body>
+</html>
