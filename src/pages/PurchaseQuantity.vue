@@ -735,8 +735,11 @@ const chartBasisPlaceholder = computed(() => {
   if (!forecastQueried.value) {
     return '请先选择筛选条件并点击「查询」。'
   }
-  if (chartDates.value.length === 0 || !chartSummaryText.value.trim()) {
+  if (loading.value) {
     return '正在预测中...'
+  }
+  if (chartDates.value.length === 0) {
+    return '正在根据预测结果绘制图表中...'
   }
   return '暂无预测依据'
 })
@@ -1908,16 +1911,40 @@ function parsePredictError(e: unknown): string {
   )
 }
 
-/** 预测依据：仍从 GET /predict/results 取综合分析（与改前一致） */
-async function loadChartSummaryFromResults(base: PredictFilterParams) {
+const ZERO_SHIPMENT_BASIS_TEXT = '由于上个发货量为0，预测未来几天的预测量为0'
+
+function pickChartSummaryFromRows(rows: PredictResultRow[]): string {
+  return rows.find((r) => (r.comprehensiveAnalysis || '').trim())?.comprehensiveAnalysis?.trim() || ''
+}
+
+function isAllZeroShipmentRows(rows: PredictResultRow[]): boolean {
+  return rows.length > 0 && rows.every((r) => !Number.isFinite(r.expectedShipment) || r.expectedShipment === 0)
+}
+
+/** 无综合分析时：若本次预测重量全为 0，展示固定说明 */
+function resolveChartSummaryText(rows: PredictResultRow[], picked: string): string {
+  const t = picked.trim()
+  if (t) return t
+  if (isAllZeroShipmentRows(rows)) return ZERO_SHIPMENT_BASIS_TEXT
+  return ''
+}
+
+/** 预测依据：优先 GET /predict/results；无内容时用 POST 已解析行的 analysis_report */
+async function loadChartSummaryFromResults(
+  base: PredictFilterParams,
+  postFallbackRows: PredictResultRow[],
+) {
+  let text = ''
   try {
     const resultsRows = await fetchAllPredictResults(base)
-    chartSummaryText.value =
-      resultsRows.find((r) => (r.comprehensiveAnalysis || '').trim())?.comprehensiveAnalysis || ''
+    text = pickChartSummaryFromRows(resultsRows)
   } catch (e) {
     console.warn('读取预测依据失败:', e)
-    chartSummaryText.value = ''
   }
+  if (!text) {
+    text = pickChartSummaryFromRows(postFallbackRows)
+  }
+  chartSummaryText.value = resolveChartSummaryText(postFallbackRows, text)
 }
 
 // ==================== 从 v2 明细拉取并填充 ====================
@@ -1939,11 +1966,10 @@ async function fetchDetailData() {
         startDate: forecastWhFilters.value.startDate,
         endDate: forecastWhFilters.value.endDate,
       })
-      await loadChartSummaryFromResults(base)
+      await loadChartSummaryFromResults(base, chartRows)
     } else {
       chartRows = await fetchAllPredictResults(base)
-      chartSummaryText.value =
-        chartRows.find((r) => (r.comprehensiveAnalysis || '').trim())?.comprehensiveAnalysis || ''
+      chartSummaryText.value = resolveChartSummaryText(chartRows, pickChartSummaryFromRows(chartRows))
     }
 
     detailRows.value = chartRows
