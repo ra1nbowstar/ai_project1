@@ -2,10 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
 import {
   deleteDetectionHistory,
+  downloadHistoryExportZip,
   deleteFeedbackEntry,
   deleteTrainingDatasetEntry,
   deleteV3Task,
   fetchDetectionHistory,
+  fetchHistoryExportPreview,
   fetchFeedbackEntries,
   fetchHealth,
   fetchModels,
@@ -26,6 +28,11 @@ import {
   type FeedbackEntry,
   type FeedbackJudgment,
   type HealthStatus,
+  type HistoryExportDetectionResult,
+  type HistoryExportFeedbackFilter,
+  type HistoryExportImageVariant,
+  type HistoryExportPreviewResult,
+  type HistoryExportRequest,
   type RuleChecksData,
   type SuggestedRoi,
   type TrainingDatasetEntry,
@@ -159,7 +166,7 @@ const historyCanNext = computed(
 )
 
 type AppView = 'detect' | 'manage'
-type ManageTab = 'feedback' | 'dataset' | 'history'
+type ManageTab = 'feedback' | 'dataset' | 'history' | 'export'
 type FeedbackFilter = FeedbackJudgment | 'all'
 
 const appView = ref<AppView>('detect')
@@ -191,6 +198,17 @@ const managedHistoryError = ref<string | null>(null)
 const managedHistoryTotal = ref(0)
 const selectedManagedHistoryId = ref<string | null>(null)
 const managedHistoryActionBusy = ref<Record<string, boolean>>({})
+
+const exportDateFrom = ref('')
+const exportDateTo = ref('')
+const exportDetectionResults = ref<HistoryExportDetectionResult[]>([])
+const exportImageVariant = ref<HistoryExportImageVariant>('original')
+const exportPreviewLoading = ref(false)
+const exportPreviewError = ref<string | null>(null)
+const exportPreview = ref<HistoryExportPreviewResult | null>(null)
+const exportZipBusy = ref(false)
+/** 最近一次 ZIP 下载的服务端统计（响应头） */
+const exportDownloadHint = ref<string | null>(null)
 
 const viewingHistoryId = ref<string | null>(null)
 /** 同步检测进行中时用于取消 fetch */
@@ -718,6 +736,144 @@ async function removeManagedHistory(entry: DetectionHistoryEntry) {
   }
 }
 
+/** 默认与历史列表 retention 一致：最近 7 天 */
+function initExportDateDefault() {
+  if (exportDateFrom.value && exportDateTo.value) return
+  const now = new Date()
+  const start = new Date(now)
+  start.setDate(start.getDate() - 7)
+  exportDateFrom.value = start.toISOString().slice(0, 10)
+  exportDateTo.value = now.toISOString().slice(0, 10)
+}
+
+function dateToExportDatetime(dateStr: string, endOfDay: boolean): string {
+  const d = dateStr.trim()
+  if (!d) return ''
+  return endOfDay ? `${d}T23:59:59` : `${d}T00:00:00`
+}
+
+function buildHistoryExportRequest(): HistoryExportRequest {
+  const start_time = dateToExportDatetime(exportDateFrom.value, false)
+  const end_time = dateToExportDatetime(exportDateTo.value, true)
+  const body: HistoryExportRequest = {
+    start_time,
+    end_time,
+    image_variant: exportImageVariant.value,
+  }
+  if (exportDetectionResults.value.length) {
+    body.detection_results = [...exportDetectionResults.value]
+  }
+  return body
+}
+
+function toggleExportDetectionResult(r: HistoryExportDetectionResult) {
+  const arr = exportDetectionResults.value
+  const i = arr.indexOf(r)
+  if (i >= 0) arr.splice(i, 1)
+  else arr.push(r)
+}
+
+function exportFeedbackStatusLabel(
+  s: HistoryExportFeedbackFilter | FeedbackJudgment | null | undefined,
+): string {
+  if (s === 'correct') return '正确'
+  if (s === 'wrong') return '错误'
+  if (s === 'suspicious') return '疑似'
+  if (s === 'unmarked') return '未标注'
+  return '—'
+}
+
+function exportModeLabel(mode: string | undefined): string {
+  const m = (mode || '').trim()
+  if (!m) return '—'
+  if (m === 'async_v3') return 'AI 异步'
+  if (m === 'sync_v1') return 'AI 同步'
+  if (m.startsWith('rule_')) return '规则'
+  return m
+}
+
+function exportPreviewImageUrl(raw: string | null | undefined): string {
+  const s = raw?.trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s
+  return '/' + s
+}
+
+function exportPreviewImageSrc(item: { id: number | string; image_url?: string | null }): string {
+  if (exportImageVariant.value === 'annotated' && item.id != null) {
+    return `/ai-detection/api/v1/history/${item.id}/image/annotated`
+  }
+  return exportPreviewImageUrl(item.image_url)
+}
+
+function exportBboxModeLabel(mode: string | undefined): string {
+  if (mode === 'manual') return '手动画框'
+  if (mode === 'auto') return '自动 OCR'
+  return '—'
+}
+
+async function runHistoryExportPreview() {
+  if (!exportDateFrom.value || !exportDateTo.value) {
+    exportPreviewError.value = '请选择开始与结束日期'
+    return
+  }
+  if (exportDateFrom.value > exportDateTo.value) {
+    exportPreviewError.value = '结束日期不得早于开始日期'
+    return
+  }
+  exportPreviewLoading.value = true
+  exportPreviewError.value = null
+  exportDownloadHint.value = null
+  try {
+    exportPreview.value = await fetchHistoryExportPreview(buildHistoryExportRequest())
+  } catch (e) {
+    exportPreview.value = null
+    exportPreviewError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    exportPreviewLoading.value = false
+  }
+}
+
+async function runHistoryExportDownload() {
+  if (!exportPreview.value) {
+    exportPreviewError.value = '请先点击「预览统计」确认导出范围'
+    return
+  }
+  if (exportPreview.value.exceeds_limit) {
+    exportPreviewError.value = `匹配 ${exportPreview.value.total_matched} 条，超过单次上限 ${exportPreview.value.export_max_records}，请缩小时间或筛选范围`
+    return
+  }
+  if (exportPreview.value.total_matched <= 0) {
+    exportPreviewError.value = '无匹配记录，无法导出'
+    return
+  }
+  exportZipBusy.value = true
+  exportPreviewError.value = null
+  exportDownloadHint.value = null
+  try {
+    const zip = await downloadHistoryExportZip(buildHistoryExportRequest())
+    const url = URL.createObjectURL(zip.blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = zip.filename
+    a.click()
+    URL.revokeObjectURL(url)
+    const parts: string[] = []
+    if (zip.recordCount != null) parts.push(`manifest ${zip.recordCount} 条`)
+    if (zip.imagesAdded != null) parts.push(`图片 ${zip.imagesAdded} 张`)
+    if (zip.skippedNoImage != null && zip.skippedNoImage > 0) {
+      parts.push(`无图跳过 ${zip.skippedNoImage} 条`)
+    }
+    exportDownloadHint.value = parts.length
+      ? `下载已开始（${parts.join('，')}）`
+      : '下载已开始'
+  } catch (e) {
+    exportPreviewError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    exportZipBusy.value = false
+  }
+}
+
 async function showManagement(tab: ManageTab = manageTab.value) {
   appView.value = 'manage'
   manageTab.value = tab
@@ -725,8 +881,10 @@ async function showManagement(tab: ManageTab = manageTab.value) {
     await loadFeedbackEntries()
   } else if (tab === 'dataset') {
     await loadDatasetEntries()
-  } else {
+  } else if (tab === 'history') {
     await loadManagedHistory()
+  } else if (tab === 'export') {
+    initExportDateDefault()
   }
 }
 
@@ -2794,7 +2952,7 @@ onUnmounted(() => {
       <section class="manage-toolbar card">
         <div>
           <h2 class="manage-title">数据管理</h2>
-          <p class="manage-subtitle">反馈标注、训练样本和历史记录维护</p>
+          <p class="manage-subtitle">反馈标注、训练样本、历史记录与数据导出</p>
         </div>
         <div class="manage-tabs" role="tablist" aria-label="数据管理分类">
           <button
@@ -2820,6 +2978,14 @@ onUnmounted(() => {
             @click="showManagement('history')"
           >
             历史记录
+          </button>
+          <button
+            type="button"
+            class="manage-tab"
+            :class="{ active: manageTab === 'export' }"
+            @click="showManagement('export')"
+          >
+            数据导出
           </button>
         </div>
       </section>
@@ -3083,7 +3249,145 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-else class="manage-grid">
+      <section v-else-if="manageTab === 'export'" class="manage-export-wrap">
+        <div class="card manage-export-card">
+          <div class="manage-card-head">
+            <h3 class="section-title tight">鉴伪历史导出</h3>
+          </div>
+          <p class="export-hint">
+            按时间范围筛选鉴伪历史，先预览统计再打包下载 ZIP（含 manifest 与图片）。默认日期为最近 7 天，与历史列表保留范围一致。
+          </p>
+          <div class="manage-date-filter-wrap">
+            <span class="filter-label">检测时间：</span>
+          </div>
+          <div class="manage-date-filter-controls">
+            <input
+              type="date"
+              class="filter-date-input"
+              v-model="exportDateFrom"
+            />
+            <span class="filter-date-sep">~</span>
+            <input
+              type="date"
+              class="filter-date-input"
+              v-model="exportDateTo"
+            />
+          </div>
+          <div class="manage-filter-row export-filter-block">
+            <span class="filter-label">鉴伪结论：</span>
+            <button
+              v-for="r in (['正常', '可疑', '篡改'] as const)"
+              :key="r"
+              type="button"
+              class="filter-chip"
+              :class="{ active: exportDetectionResults.includes(r) }"
+              @click="toggleExportDetectionResult(r)"
+            >
+              {{ r }}
+            </button>
+            <span class="export-filter-note">不选表示全部</span>
+          </div>
+          <div class="manage-filter-row export-filter-block">
+            <span class="filter-label">ZIP 内图片：</span>
+            <button
+              type="button"
+              class="filter-chip"
+              :class="{ active: exportImageVariant === 'original' }"
+              @click="exportImageVariant = 'original'"
+            >
+              原图
+            </button>
+            <button
+              type="button"
+              class="filter-chip"
+              :class="{ active: exportImageVariant === 'annotated' }"
+              @click="exportImageVariant = 'annotated'"
+            >
+              标注图
+            </button>
+          </div>
+          <div class="manage-actions export-actions">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="exportPreviewLoading || exportZipBusy"
+              @click="runHistoryExportPreview"
+            >
+              <span v-if="exportPreviewLoading" class="btn-spinner export-spinner-dark" />
+              {{ exportPreviewLoading ? '统计中…' : '预览统计' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="
+                exportZipBusy ||
+                exportPreviewLoading ||
+                !exportPreview ||
+                exportPreview.exceeds_limit ||
+                exportPreview.total_matched <= 0
+              "
+              @click="runHistoryExportDownload"
+            >
+              <span v-if="exportZipBusy" class="btn-spinner" />
+              {{ exportZipBusy ? '打包中…' : '下载 ZIP' }}
+            </button>
+          </div>
+          <p v-if="exportPreviewError" class="history-error">{{ exportPreviewError }}</p>
+          <p v-if="exportDownloadHint" class="export-download-ok">{{ exportDownloadHint }}</p>
+          <div v-if="exportPreview" class="export-summary card-inner">
+            <div class="manage-summary-row export-summary-row">
+              <span>匹配 {{ exportPreview.total_matched }} 条</span>
+              <span>有图 {{ exportPreview.with_image }}</span>
+              <span>无图 {{ exportPreview.without_image }}</span>
+              <span>上限 {{ exportPreview.export_max_records }}</span>
+            </div>
+            <p v-if="exportPreview.exceeds_limit" class="export-limit-warn">
+              匹配条数超过单次导出上限，请缩小时间或筛选条件后再导出。
+            </p>
+            <p v-else-if="exportPreview.total_matched <= 0" class="history-empty">
+              当前条件下无记录。
+            </p>
+            <p v-if="exportPreview.preview_truncated" class="export-truncate-hint">
+              下方列表已截断（最多展示部分明细），以「匹配条数」为准。
+            </p>
+          </div>
+          <ul v-if="exportPreview?.list?.length" class="manage-list export-preview-list">
+            <li v-for="item in exportPreview.list" :key="item.id" class="export-preview-row">
+              <div class="export-preview-main">
+                <span class="manage-row-top">
+                  <span class="pill sm" :class="item.detection_result">{{ item.detection_result || '—' }}</span>
+                  <span class="history-kind">{{ exportModeLabel(item.mode) }}</span>
+                  <span class="history-kind">{{ exportBboxModeLabel(item.bbox_mode) }}</span>
+                  <span
+                    v-if="item.feedback_status"
+                    class="history-kind history-kind--feedback"
+                    :class="item.feedback_status"
+                  >{{ exportFeedbackStatusLabel(item.feedback_status) }}</span>
+                  <span v-if="!item.has_image" class="history-kind">无图</span>
+                  <span class="feedback-row-time">{{ formatHistoryTime(item.created_at) }}</span>
+                </span>
+                <span class="history-file" :title="item.original_filename || ''">{{
+                  truncateName(item.original_filename || String(item.id), 28)
+                }}</span>
+              </div>
+              <div
+                v-if="exportPreviewImageSrc(item)"
+                class="export-preview-thumb"
+                @click="openPreviewLightbox(exportPreviewImageSrc(item))"
+              >
+                <img
+                  :src="exportPreviewImageSrc(item)"
+                  alt=""
+                  class="export-thumb-img"
+                  loading="lazy"
+                />
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section v-else-if="manageTab === 'history'" class="manage-grid">
         <div class="card manage-list-card">
           <div class="manage-card-head">
             <h3 class="section-title tight">历史记录</h3>
@@ -3590,6 +3894,126 @@ onUnmounted(() => {
   grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
+}
+
+.manage-export-wrap {
+  width: 100%;
+}
+
+.manage-export-card {
+  padding: 1rem 1.1rem;
+}
+
+.export-hint {
+  margin: 0 0 0.85rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.export-filter-block {
+  margin-top: 0.55rem;
+  align-items: center;
+}
+
+.export-filter-note {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-left: 0.15rem;
+}
+
+.export-actions {
+  margin-top: 1rem;
+}
+
+.export-spinner-dark {
+  border-color: rgba(15, 23, 42, 0.2);
+  border-top-color: var(--brand);
+}
+
+.export-summary {
+  margin-top: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px dashed var(--border);
+}
+
+.card-inner {
+  background: transparent;
+}
+
+.export-summary-row {
+  margin: 0;
+}
+
+.export-download-ok {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-sm);
+}
+
+.export-limit-warn {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm);
+}
+
+.export-truncate-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.export-preview-list {
+  max-height: min(52vh, 480px);
+}
+
+.export-preview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.export-preview-main {
+  min-width: 0;
+}
+
+.export-preview-thumb {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  cursor: pointer;
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+.export-preview-thumb:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.export-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .manage-list-card,

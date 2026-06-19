@@ -1628,6 +1628,137 @@ export async function deleteDetectionHistory(recordId: string | number): Promise
   }
 }
 
+// ---- 鉴伪历史导出 ----
+
+export type HistoryExportDetectionResult = '正常' | '可疑' | '篡改'
+export type HistoryExportBboxMode = 'all' | 'manual' | 'auto'
+export type HistoryExportImageVariant = 'original' | 'annotated'
+export type HistoryExportMatchMode = 'primary' | 'any'
+/** 导出筛选：含未标注（数据库 feedback_status 为 NULL） */
+export type HistoryExportFeedbackFilter = FeedbackJudgment | 'unmarked'
+
+export interface HistoryExportRequest {
+  start_time: string
+  end_time: string
+  detection_results?: HistoryExportDetectionResult[]
+  bbox_mode?: HistoryExportBboxMode
+  feedback_status?: HistoryExportFeedbackFilter[]
+  modes?: string[]
+  status?: string
+  match_mode?: HistoryExportMatchMode
+  image_variant?: HistoryExportImageVariant
+}
+
+export interface HistoryExportPreviewItem {
+  id: number
+  created_at: string
+  mode: string
+  task_id?: string | null
+  original_filename?: string | null
+  status: string
+  detection_result: string
+  detection_results_all?: string[]
+  bbox_mode?: 'manual' | 'auto' | 'unknown'
+  has_image: boolean
+  image_url?: string | null
+  feedback_status?: FeedbackJudgment | null
+}
+
+export interface HistoryExportPreviewResult {
+  status: string
+  total_matched: number
+  with_image: number
+  without_image: number
+  export_max_records: number
+  exceeds_limit: boolean
+  preview_truncated: boolean
+  preview_list_size: number
+  filters_applied?: Record<string, unknown>
+  list: HistoryExportPreviewItem[]
+}
+
+async function parseJsonErrorDetail(res: Response, fallback: string): Promise<string> {
+  const t = await res.text()
+  try {
+    const j = JSON.parse(t) as { detail?: unknown; message?: unknown }
+    if (typeof j.detail === 'string' && j.detail.trim()) return j.detail.trim()
+    if (Array.isArray(j.detail)) return j.detail.map(String).join('; ')
+    if (typeof j.message === 'string' && j.message.trim()) return j.message.trim()
+  } catch {
+    /* ignore */
+  }
+  if (t.trim() && !t.trim().startsWith('<')) return t.trim().slice(0, 300)
+  return fallback || httpFailMessage(res.status, t)
+}
+
+export async function fetchHistoryExportPreview(
+  body: HistoryExportRequest,
+  opts?: { signal?: AbortSignal },
+): Promise<HistoryExportPreviewResult> {
+  const res = await fetch(aiDetectionUrl('/api/v1/history/export/preview'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  })
+  if (!res.ok) {
+    throw new Error(await parseJsonErrorDetail(res, `预览失败（HTTP ${res.status}）`))
+  }
+  const json = (await res.json()) as HistoryExportPreviewResult
+  return {
+    ...json,
+    total_matched: Number(json.total_matched ?? 0),
+    with_image: Number(json.with_image ?? 0),
+    without_image: Number(json.without_image ?? 0),
+    export_max_records: Number(json.export_max_records ?? 500),
+    exceeds_limit: Boolean(json.exceeds_limit),
+    preview_truncated: Boolean(json.preview_truncated),
+    preview_list_size: Number(json.preview_list_size ?? 0),
+    list: Array.isArray(json.list) ? json.list : [],
+  }
+}
+
+export interface HistoryExportZipResult {
+  blob: Blob
+  filename: string
+  recordCount?: number
+  imagesAdded?: number
+  skippedNoImage?: number
+}
+
+function readExportCountHeader(res: Response, name: string): number | undefined {
+  const raw = res.headers.get(name)?.trim()
+  if (!raw) return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
+}
+
+export async function downloadHistoryExportZip(
+  body: HistoryExportRequest,
+  opts?: { signal?: AbortSignal },
+): Promise<HistoryExportZipResult> {
+  const res = await fetch(aiDetectionUrl('/api/v1/history/export'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  })
+  if (!res.ok) {
+    throw new Error(await parseJsonErrorDetail(res, `导出失败（HTTP ${res.status}）`))
+  }
+  const blob = await res.blob()
+  const cd = res.headers.get('Content-Disposition') ?? ''
+  const m = cd.match(/filename="(.+)"/i) ?? cd.match(/filename=([^;\s]+)/i)
+  const filename = m?.[1]?.replace(/^["']|["']$/g, '') || 'ai_detection_export.zip'
+  return {
+    blob,
+    filename,
+    recordCount: readExportCountHeader(res, 'X-Export-Record-Count'),
+    imagesAdded: readExportCountHeader(res, 'X-Export-Images-Added'),
+    skippedNoImage: readExportCountHeader(res, 'X-Export-Skipped-No-Image'),
+  }
+}
+
 // ---- 训练集管理 ----
 
 export type TrainingDatasetLabel = 0 | 1
