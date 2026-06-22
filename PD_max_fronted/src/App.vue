@@ -421,10 +421,17 @@ async function checkHealth() {
 /** 将文件的 lastModified 格式化为 "YYYY-MM-DD HH:MM:SS" */
 function formatImageCreatedAt(file: File): string {
   try {
-    const d = new Date(file.lastModified)
-    if (isNaN(d.getTime())) return ''
+    const ts = file.lastModified
+    console.log('[image_created_at] file:', file.name, 'lastModified:', ts, '→', new Date(ts).toISOString())
+    const d = new Date(ts)
+    if (isNaN(d.getTime())) {
+      console.warn('[image_created_at] INVALID lastModified for:', file.name)
+      return ''
+    }
     const pad = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    const result = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    console.log('[image_created_at] formatted:', result)
+    return result
   } catch {
     return ''
   }
@@ -439,11 +446,13 @@ function formatFileSize(bytes: number): string {
 
 function detectSubmitOpts(signal: AbortSignal, withRuleChecks = false, imageCreatedAt?: string | null) {
   const t = documentTime.value.trim()
+  const finalImageCreatedAt = imageCreatedAt || null
+  console.log('[detectSubmitOpts] image_created_at input:', JSON.stringify(imageCreatedAt), '→ output:', JSON.stringify(finalImageCreatedAt))
   return {
     signal,
     document_time: t || null,
     with_rule_checks: withRuleChecks,
-    image_created_at: imageCreatedAt || null,
+    image_created_at: finalImageCreatedAt,
   }
 }
 
@@ -2967,7 +2976,7 @@ onUnmounted(() => {
                 <span class="history-file" :title="h.fileName">{{
                   truncateName(h.fileName)
                 }}</span>
-                <span v-if="h.imageCreatedAt" class="history-file-time">{{ h.imageCreatedAt }}</span>
+                <span class="history-file-time">{{ h.imageCreatedAt || '—' }}</span>
                 <span class="pill sm history-pill" :class="historyPillClass(h)">{{
                   historyResultLabel(h)
                 }}</span>
@@ -3490,7 +3499,7 @@ onUnmounted(() => {
                   >{{ historyFeedbackStatusLabel(entry) }}</span>
                 </span>
                 <span class="history-file">{{ entry.fileName }}</span>
-                <span v-if="entry.imageCreatedAt" class="history-file-time">{{ entry.imageCreatedAt }}</span>
+                <span class="history-file-time">{{ entry.imageCreatedAt || '—' }}</span>
               </button>
               <button
                 type="button"
@@ -3523,7 +3532,7 @@ onUnmounted(() => {
               <div class="manage-detail-body">
                 <dl class="manage-facts">
                   <div><dt>文件</dt><dd>{{ selectedManagedHistory.fileName }}</dd></div>
-                  <div v-if="selectedManagedHistory.imageCreatedAt"><dt>修改时间</dt><dd>{{ selectedManagedHistory.imageCreatedAt }}</dd></div>
+                  <div><dt>修改时间</dt><dd>{{ selectedManagedHistory.imageCreatedAt || '—' }}</dd></div>
                   <div><dt>任务</dt><dd>{{ selectedManagedHistory.taskId || '—' }}</dd></div>
                   <div><dt>结果</dt><dd>{{ historyResultLabel(selectedManagedHistory) }}</dd></div>
                   <div><dt>类型</dt><dd>{{ historyKindLabel(selectedManagedHistory) || '—' }}</dd></div>
@@ -4300,10 +4309,6 @@ onUnmounted(() => {
   .history-aside .history-card {
     position: static;
   }
-
-  .history-list {
-    max-height: min(220px, 38vh);
-  }
 }
 
 @media (max-width: 960px) {
@@ -4860,17 +4865,12 @@ onUnmounted(() => {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: min(36vh, 280px);
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.2rem;
 }
 
 @media (min-width: 1181px) {
-  .history-aside .history-list {
-    max-height: calc(100vh - 11.5rem);
-  }
 }
 
 .history-row {
@@ -4894,10 +4894,10 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 0.28rem;
-  padding: 0.52rem 0.5rem;
-  min-height: 86px;
-  line-height: 1.4;
+  gap: 0.12rem;
+  padding: 0.3rem 0.45rem;
+  min-height: 56px;
+  line-height: 1.35;
   text-align: left;
   border: none;
   background: transparent;

@@ -523,10 +523,15 @@ function updateChartTooltipPosition(index: number) {
   const scaleY = rect.height / canvas.height
   const left = chartLayout.toX(index) * scaleX
   const top = chartLayout.toY(row.均价) * scaleY
+  /** 顶部留白不够放 tooltip 时翻到数据点下方 */
+  const tooltipMinTop = 90
+  const below = top < tooltipMinTop
   chartTooltipStyle.value = {
     left: `${left}px`,
     top: `${top}px`,
-    transform: 'translate(-50%, calc(-100% - 10px))',
+    transform: below
+      ? 'translate(-50%, 10px)'
+      : 'translate(-50%, calc(-100% - 10px))',
   }
 }
 
@@ -603,7 +608,7 @@ onBeforeUnmount(() => {
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-band { display: inline-block; width: 16px; height: 10px; background: rgba(20, 118, 219, 0.2); border-radius: 2px; }
 .legend-line { display: inline-block; width: 16px; height: 2px; background: #1476db; }
-.chart-wrap { position: relative; width: 100%; overflow-x: auto; }
+.chart-wrap { position: relative; width: 100%; }
 .chart-canvas { display: block; width: 100%; cursor: crosshair; }
 .chart-tooltip {
   position: absolute;
