@@ -305,6 +305,12 @@ async function loadList() {
 }
 
 async function handleQuery() {
+  const start = filters.value.dateFrom
+  const end = filters.value.dateTo
+  if (start && end && end < start) {
+    window.alert('结束日期不能早于开始日期，请重新选择')
+    return
+  }
   listPage.value = 1
   await Promise.all([loadChart(), loadList()])
 }

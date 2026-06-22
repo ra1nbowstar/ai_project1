@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import {
   deleteDetectionHistory,
   downloadHistoryExportZip,
@@ -63,6 +63,12 @@ const uploadInputRef = ref<HTMLInputElement | null>(null)
 const historyPreviewUrl = ref<string | null>(null)
 const imgRef = ref<HTMLImageElement | null>(null)
 const imageNatural = ref({ w: 0, h: 0 })
+/** 当前选中文件的图片创建时间（从 lastModified 格式化） */
+const selectedFileImageCreatedAt = computed(() => {
+  const idx = selectedUploadIndex.value
+  if (idx < 0 || idx >= files.value.length) return ''
+  return formatImageCreatedAt(files.value[idx]!)
+})
 
 const v3SpecifyBbox = ref(false)
 /** 单据时间（可选）：付款截图等场景供后端时间校验 */
@@ -211,6 +217,22 @@ const exportZipBusy = ref(false)
 const exportDownloadHint = ref<string | null>(null)
 
 const viewingHistoryId = ref<string | null>(null)
+/** 当前正在查看的历史记录条目（点击历史列表时直接存入，不从数组查找） */
+const currentViewingEntry = ref<DetectionHistoryEntry | null>(null)
+const viewingHistoryEntry = computed(() => {
+  if (!viewingHistoryId.value) return currentViewingEntry.value
+  return (
+    currentViewingEntry.value ??
+    historyEntries.value.find((e) => e.id === viewingHistoryId.value) ??
+    managedHistoryRows.value.find((e) => e.id === viewingHistoryId.value) ??
+    null
+  )
+})
+/** viewingHistoryId 清空时同步清掉缓存的条目 */
+watch(viewingHistoryId, (id) => {
+  if (!id) currentViewingEntry.value = null
+})
+
 /** 同步检测进行中时用于取消 fetch */
 const detectAbort = ref<AbortController | null>(null)
 
@@ -396,12 +418,32 @@ async function checkHealth() {
   }
 }
 
-function detectSubmitOpts(signal: AbortSignal, withRuleChecks = false) {
+/** 将文件的 lastModified 格式化为 "YYYY-MM-DD HH:MM:SS" */
+function formatImageCreatedAt(file: File): string {
+  try {
+    const d = new Date(file.lastModified)
+    if (isNaN(d.getTime())) return ''
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  } catch {
+    return ''
+  }
+}
+
+/** 格式化文件大小 */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function detectSubmitOpts(signal: AbortSignal, withRuleChecks = false, imageCreatedAt?: string | null) {
   const t = documentTime.value.trim()
   return {
     signal,
     document_time: t || null,
     with_rule_checks: withRuleChecks,
+    image_created_at: imageCreatedAt || null,
   }
 }
 
@@ -897,6 +939,7 @@ async function startRuleChecks(
   bbox: BboxXYXY | null,
   signal: AbortSignal,
   taskId?: string | null,
+  imageCreatedAt?: string | null,
 ): Promise<RuleChecksData> {
   ruleCheckLoading.value = true
   ruleCheckError.value = null
@@ -906,7 +949,7 @@ async function startRuleChecks(
   const t0 = performance.now()
   try {
     const data = await submitRuleChecks(file, bbox, {
-      ...detectSubmitOpts(signal),
+      ...detectSubmitOpts(signal, false, imageCreatedAt ?? formatImageCreatedAt(file)),
       task_id: taskId,
     })
     ruleCheckPayload.value = data
@@ -993,7 +1036,7 @@ async function runRoiDetect(file: File) {
   const t0 = performance.now()
   try {
     const data = await submitRuleChecks(file, selectedRoi.bbox as BboxXYXY, {
-      ...detectSubmitOpts(new AbortController().signal),
+      ...detectSubmitOpts(new AbortController().signal, false, formatImageCreatedAt(file)),
     })
     ruleCheckPayload.value = data
     ruleCheckElapsed.value = Math.round(performance.now() - t0)
@@ -1070,11 +1113,12 @@ async function runV3AsyncOne(
   progressPrefix: string,
   signal: AbortSignal,
   withRuleChecks = false,
+  imageCreatedAt?: string | null,
 ): Promise<{ taskId: string; payload: V3ViewPayload }> {
   pollStatus.value = withRuleChecks
     ? `${progressPrefix}：提交检测与辅助核查…`
     : `${progressPrefix}：提交任务…`
-  const submit = await submitV3Detect(file, bbox, detectSubmitOpts(signal, withRuleChecks))
+  const submit = await submitV3Detect(file, bbox, detectSubmitOpts(signal, withRuleChecks, imageCreatedAt ?? formatImageCreatedAt(file)))
   const taskId = submit.task_id?.trim()
   if (!taskId) throw new Error(`${progressPrefix}：未返回任务 ID`)
   pollStatus.value = withRuleChecks
@@ -1767,6 +1811,7 @@ async function applyHistoryEntry(entry: DetectionHistoryEntry) {
   errorMsg.value = null
   pollStatus.value = ''
   viewingHistoryId.value = entry.id
+  currentViewingEntry.value = entry
   imageNatural.value = { w: 0, h: 0 }
   ruleCheckPayload.value = entry.ruleCheck ?? null
   ruleCheckError.value = null
@@ -1916,7 +1961,7 @@ async function runV3() {
     resetRuleCheck()
     try {
       pollStatus.value = '正在提交检测…'
-      const data = await submitV1ImageDetectSync(one, bbox, detectSubmitOpts(ac.signal))
+      const data = await submitV1ImageDetectSync(one, bbox, detectSubmitOpts(ac.signal, false, formatImageCreatedAt(one)))
       if (data.error_msg?.trim() && !data.result && !(data.multi?.length)) {
         throw new Error(data.error_msg)
       }
@@ -2359,16 +2404,16 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="activePreviewUrl"
+            v-if="activePreviewUrl || (viewingHistoryId && historyPreviewUrl)"
             class="stage"
             @mouseleave="drawing ? onDrawUp() : null"
           >
             <img
               ref="imgRef"
-              :src="activePreviewUrl"
+              :src="(viewingHistoryId && historyPreviewUrl ? historyPreviewUrl : activePreviewUrl) || undefined"
               alt="待检测图片"
               class="preview-img"
-              :class="{ 'preview-img-zoomin': !v3SpecifyBbox && !busy }"
+              :class="{ 'preview-img-zoomin': !viewingHistoryId && !v3SpecifyBbox && !busy }"
               draggable="false"
               @load="onImgLoad"
               @error="onImgError"
@@ -2491,6 +2536,26 @@ onUnmounted(() => {
             />
           </div>
 
+          <div v-if="files.length && !viewingHistoryId" class="preview-file-info">
+            <div class="preview-file-name" :title="files[selectedUploadIndex]?.name">
+              📄 {{ files[selectedUploadIndex]?.name || '-' }}
+            </div>
+            <div class="preview-file-meta-row">
+              <span>{{ files[selectedUploadIndex] ? formatFileSize(files[selectedUploadIndex]!.size) : '-' }}</span>
+              <span class="preview-file-info-sep">·</span>
+              <span>{{ selectedFileImageCreatedAt || '-' }}</span>
+            </div>
+          </div>
+
+          <div v-else-if="viewingHistoryEntry" class="preview-file-info">
+            <div class="preview-file-name" :title="viewingHistoryEntry.fileName">
+              📄 {{ viewingHistoryEntry.fileName }}
+            </div>
+            <div class="preview-file-meta-row">
+              <span>{{ viewingHistoryEntry.imageCreatedAt || '—' }}</span>
+            </div>
+          </div>
+
           <div v-else class="empty-preview">
             <p>请先在左侧上传一张图片</p>
             <p v-if="viewingHistoryId" class="history-preview-hint">
@@ -2507,6 +2572,13 @@ onUnmounted(() => {
                 >历史记录</span
               >
             </div>
+          </div>
+
+          <div v-if="viewingHistoryEntry" class="history-file-meta">
+            <div class="history-file-name" :title="viewingHistoryEntry.fileName"
+              >📄 {{ viewingHistoryEntry.fileName }}</div
+            >
+            <div class="history-file-time">{{ viewingHistoryEntry.imageCreatedAt || '—' }}</div>
           </div>
 
           <div v-if="hasAiReport" class="report">
@@ -2796,7 +2868,7 @@ onUnmounted(() => {
             >
               <p class="history-schematic-title">区域位置示意</p>
               <p class="history-schematic-note">
-                服务端未保留原图或标注图时，仅根据检测坐标绘制框线（与接口像素坐标一致，非真实底图）。
+                服务端未保留原图或标注图，仅根据检测坐标绘制示意框线。
               </p>
               <svg
                 class="history-schematic-svg"
@@ -2895,6 +2967,7 @@ onUnmounted(() => {
                 <span class="history-file" :title="h.fileName">{{
                   truncateName(h.fileName)
                 }}</span>
+                <span v-if="h.imageCreatedAt" class="history-file-time">{{ h.imageCreatedAt }}</span>
                 <span class="pill sm history-pill" :class="historyPillClass(h)">{{
                   historyResultLabel(h)
                 }}</span>
@@ -3417,6 +3490,7 @@ onUnmounted(() => {
                   >{{ historyFeedbackStatusLabel(entry) }}</span>
                 </span>
                 <span class="history-file">{{ entry.fileName }}</span>
+                <span v-if="entry.imageCreatedAt" class="history-file-time">{{ entry.imageCreatedAt }}</span>
               </button>
               <button
                 type="button"
@@ -3449,6 +3523,7 @@ onUnmounted(() => {
               <div class="manage-detail-body">
                 <dl class="manage-facts">
                   <div><dt>文件</dt><dd>{{ selectedManagedHistory.fileName }}</dd></div>
+                  <div v-if="selectedManagedHistory.imageCreatedAt"><dt>修改时间</dt><dd>{{ selectedManagedHistory.imageCreatedAt }}</dd></div>
                   <div><dt>任务</dt><dd>{{ selectedManagedHistory.taskId || '—' }}</dd></div>
                   <div><dt>结果</dt><dd>{{ historyResultLabel(selectedManagedHistory) }}</dd></div>
                   <div><dt>类型</dt><dd>{{ historyKindLabel(selectedManagedHistory) || '—' }}</dd></div>
@@ -4531,6 +4606,60 @@ onUnmounted(() => {
   color: #1e40af;
 }
 
+.preview-file-info {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  padding: 0.3rem 0.15rem;
+}
+
+.preview-file-name {
+  color: var(--text);
+  font-weight: 500;
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.preview-file-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #94a3b8;
+  font-size: 0.7rem;
+}
+
+.preview-file-info-sep {
+  color: #c0c4cc;
+  flex-shrink: 0;
+}
+
+.history-file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 1rem;
+  margin: 0 1rem 0.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.history-file-name {
+  font-size: 0.82rem;
+  color: var(--text);
+  font-weight: 500;
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.history-file-time {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
 .option-row {
   margin-top: 1rem;
 }
@@ -4750,7 +4879,6 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  overflow: hidden;
 }
 
 .history-row.active {
@@ -4902,6 +5030,13 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.history-file-time {
+  display: block;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  line-height: 1.3;
 }
 
 .history-pill {

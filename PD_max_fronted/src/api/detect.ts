@@ -96,6 +96,17 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+function fileModifiedString(file: File): string | null {
+  try {
+    const d = new Date(file.lastModified)
+    if (isNaN(d.getTime())) return null
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  } catch {
+    return null
+  }
+}
+
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
@@ -581,6 +592,7 @@ async function runMockDetect(file: File, bbox: BboxXYXY, signal?: AbortSignal): 
     mode: 'v1-sync-mock',
     task_id: taskId,
     original_filename: file.name || '未命名图片',
+    image_created_at: fileModifiedString(file),
     bbox,
     status: 'COMPLETED',
     outcome: {
@@ -636,6 +648,8 @@ export type DetectSubmitOpts = {
   document_time?: string | null
   /** 为 true 时后端在 v3 完成后自动跑规则并写入同一 task_id */
   with_rule_checks?: boolean
+  /** 图片创建时间（取自文件 lastModified），格式 "YYYY-MM-DD HH:MM:SS"，透传到历史记录 */
+  image_created_at?: string | null
 }
 
 export type RuleCheckSubmitOpts = DetectSubmitOpts & {
@@ -646,6 +660,11 @@ export type RuleCheckSubmitOpts = DetectSubmitOpts & {
 function appendDocumentTime(fd: FormData, documentTime?: string | null): void {
   const t = typeof documentTime === 'string' ? documentTime.trim() : ''
   if (t) fd.append('document_time', t)
+}
+
+function appendImageCreatedAt(fd: FormData, imageCreatedAt?: string | null): void {
+  const t = typeof imageCreatedAt === 'string' ? imageCreatedAt.trim() : ''
+  if (t) fd.append('image_created_at', t)
 }
 
 export type TimestampAnomaly =
@@ -681,6 +700,7 @@ export async function submitV3Detect(
   fd.append('file', file)
   if (bbox != null) fd.append('bbox', JSON.stringify(bbox))
   appendDocumentTime(fd, opts?.document_time)
+  appendImageCreatedAt(fd, opts?.image_created_at)
   if (opts?.with_rule_checks) fd.append('with_rule_checks', 'true')
   const res = await fetch(aiDetectionUrl('/api/v3/detect'), {
     method: 'POST',
@@ -769,6 +789,7 @@ export async function submitV1ImageDetectSync(
   fd.append('file', file)
   fd.append('bbox', JSON.stringify(bbox))
   appendDocumentTime(fd, opts?.document_time)
+  appendImageCreatedAt(fd, opts?.image_created_at)
   const res = await fetch(aiDetectionUrl('/api/v1/image-detection/detect'), {
     method: 'POST',
     body: fd,
@@ -1001,6 +1022,7 @@ export interface DetectionHistoryApiRecord {
   task_id?: string | null
   original_filename?: string | null
   image_url?: string | null
+  image_created_at?: string | null
   bbox?: unknown
   status: string
   outcome?: DetectionHistoryOutcome | null
@@ -1062,6 +1084,12 @@ function coerceApiRecord(raw: Record<string, unknown>): DetectionHistoryApiRecor
       : typeof raw.imageUrl === 'string'
         ? raw.imageUrl
         : null
+  const imageCreatedAt =
+    typeof raw.image_created_at === 'string'
+      ? raw.image_created_at
+      : typeof raw.imageCreatedAt === 'string'
+        ? raw.imageCreatedAt
+        : null
   let outcome: DetectionHistoryOutcome | null = null
   const oc = raw.outcome
   if (isRecord(oc)) {
@@ -1110,6 +1138,7 @@ function coerceApiRecord(raw: Record<string, unknown>): DetectionHistoryApiRecor
     task_id: taskId,
     original_filename: name,
     image_url: imageUrl,
+    image_created_at: imageCreatedAt,
     bbox: raw.bbox,
     status: st,
     outcome,
@@ -1445,6 +1474,7 @@ async function postRuleCheckMultipart(
     if (v != null && v !== '') fd.append(k, v)
   }
   appendDocumentTime(fd, opts?.document_time)
+  appendImageCreatedAt(fd, opts?.image_created_at)
   const taskId = typeof opts?.task_id === 'string' ? opts.task_id.trim() : ''
   if (taskId) fd.append('task_id', taskId)
   const res = await fetch(aiDetectionUrl(path), {
@@ -1481,6 +1511,7 @@ export async function submitPixelOverlapCheck(
   fd.append('file', file)
   fd.append('bbox', JSON.stringify(bbox))
   appendDocumentTime(fd, opts?.document_time)
+  appendImageCreatedAt(fd, opts?.image_created_at)
   const res = await fetch(aiDetectionUrl('/api/v1/pixel-overlap/check'), {
     method: 'POST',
     body: fd,
@@ -1502,6 +1533,7 @@ export async function submitTimestampCheck(
   const fd = new FormData()
   fd.append('file', file)
   appendDocumentTime(fd, opts?.document_time)
+  appendImageCreatedAt(fd, opts?.image_created_at)
   const res = await fetch(aiDetectionUrl('/api/v1/timestamp/check'), {
     method: 'POST',
     body: fd,
@@ -1655,6 +1687,7 @@ export interface HistoryExportPreviewItem {
   mode: string
   task_id?: string | null
   original_filename?: string | null
+  image_created_at?: string | null
   status: string
   detection_result: string
   detection_results_all?: string[]

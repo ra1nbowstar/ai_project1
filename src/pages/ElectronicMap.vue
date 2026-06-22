@@ -3611,10 +3611,10 @@ function formatValuePerTonCell(row: ComparisonRankItem): string {
 
 function comparisonXunRongBaoTitle(row: ComparisonRankItem): string {
   if (row.xunRongBaoExcludedPricing) {
-    return '本行为不含循融宝口径（来自接口「不含循融宝」对象）；运费与含循融宝行一致。'
+    return '不含循融宝口径；运费与含循融宝行一致。'
   }
   const n = row.xunRongBaoSurchargeYuanPerTon
-  const suffix = '列表金额与排序为含循融宝口径（与接口顶层字段一致）。'
+  const suffix = '列表金额与排序为含循融宝口径。'
   if (n != null && Number.isFinite(n)) {
     return `${n} 元/吨（在不含税基准上加价后重算含税列）；${suffix}`
   }
