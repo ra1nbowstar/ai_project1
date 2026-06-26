@@ -5156,13 +5156,7 @@ function openForecastAnalysisDrawer(row: ForecastDetailRow) {
     row.productVariety ? `品类：${row.productVariety}` : '',
     row.smelter ? `冶炼厂：${row.smelter}` : '',
   ].filter(Boolean)
-  const sections: Array<{ title: string; content: string }> = []
-  if (row.historyAnalysis) sections.push({ title: '历史发货规律分析', content: row.historyAnalysis })
-  if (row.priceSensitivityAnalysis) sections.push({ title: '价格敏感度分析', content: row.priceSensitivityAnalysis })
-  if (row.priceCompetitivenessAnalysis) sections.push({ title: '目标冶炼厂价格竞争力分析', content: row.priceCompetitivenessAnalysis })
-  if (row.holidayAnalysis) sections.push({ title: '节假日影响', content: row.holidayAnalysis })
-  if (row.weatherAnalysis) sections.push({ title: '天气物流影响', content: row.weatherAnalysis })
-  forecastAnalysisDrawerSections.value = sections
+  forecastAnalysisDrawerSections.value = []
   forecastAnalysisDrawerVisible.value = true
 }
 
