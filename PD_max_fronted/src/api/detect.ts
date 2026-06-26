@@ -615,6 +615,8 @@ async function runMockDetect(file: File, bbox: BboxXYXY, signal?: AbortSignal): 
 export interface V3SubmitBody {
   status: string
   task_id: string
+  /** 批次号，后端自动生成或透传前端传入值 */
+  batch?: string | null
 }
 
 function normalizeV3SubmitJson(json: unknown): V3SubmitBody {
@@ -631,6 +633,8 @@ function normalizeV3SubmitJson(json: unknown): V3SubmitBody {
       : typeof o.message === 'string' && taskId
         ? 'pending'
         : ''
+  const batch =
+    typeof o.batch === 'string' ? o.batch.trim() : null
 
   if (!taskId) {
     throw new Error('服务端未返回任务 ID')
@@ -639,6 +643,7 @@ function normalizeV3SubmitJson(json: unknown): V3SubmitBody {
   return {
     status: status || 'pending',
     task_id: taskId,
+    batch: batch || null,
   }
 }
 
@@ -650,6 +655,8 @@ export type DetectSubmitOpts = {
   with_rule_checks?: boolean
   /** 图片创建时间（取自文件 lastModified），格式 "YYYY-MM-DD HH:MM:SS"，透传到历史记录 */
   image_created_at?: string | null
+  /** 批次号，如 "20260626-001"。不传则后端自动生成；同批次多张图传相同值即共享 */
+  batch?: string | null
 }
 
 export type RuleCheckSubmitOpts = DetectSubmitOpts & {
@@ -665,6 +672,11 @@ function appendDocumentTime(fd: FormData, documentTime?: string | null): void {
 function appendImageCreatedAt(fd: FormData, imageCreatedAt?: string | null): void {
   const t = typeof imageCreatedAt === 'string' ? imageCreatedAt.trim() : ''
   if (t) fd.append('image_created_at', t)
+}
+
+function appendBatch(fd: FormData, batch?: string | null): void {
+  const t = typeof batch === 'string' ? batch.trim() : ''
+  if (t) fd.append('batch', t)
 }
 
 export type TimestampAnomaly =
@@ -701,6 +713,7 @@ export async function submitV3Detect(
   if (bbox != null) fd.append('bbox', JSON.stringify(bbox))
   appendDocumentTime(fd, opts?.document_time)
   appendImageCreatedAt(fd, opts?.image_created_at)
+  appendBatch(fd, opts?.batch)
   if (opts?.with_rule_checks) fd.append('with_rule_checks', 'true')
   const res = await fetch(aiDetectionUrl('/api/v3/detect'), {
     method: 'POST',
@@ -722,6 +735,8 @@ export interface V1SyncDetectBody {
   multi?: V3ResultItem[]
   error_msg?: string | null
   task_id?: string | null
+  /** 批次号，后端自动生成或透传前端传入值 */
+  batch?: string | null
 }
 
 function outcomeLayer(json: unknown): Record<string, unknown> {
@@ -754,6 +769,8 @@ function normalizeV1SyncJson(json: unknown): V1SyncDetectBody {
       : typeof o.taskId === 'string'
         ? o.taskId
         : null
+  const batch =
+    typeof o.batch === 'string' ? o.batch.trim() : null
   const status = typeof o.status === 'string' ? o.status : undefined
   if (o.success === false || o.ok === false) {
     return {
@@ -765,6 +782,7 @@ function normalizeV1SyncJson(json: unknown): V1SyncDetectBody {
         (typeof o.message === 'string' ? o.message : null) ||
         '检测失败',
       task_id: taskId,
+      batch: batch || null,
     }
   }
   return {
@@ -773,6 +791,7 @@ function normalizeV1SyncJson(json: unknown): V1SyncDetectBody {
     multi: multi as V3ResultItem[] | undefined,
     error_msg: err,
     task_id: taskId,
+    batch: batch || null,
   }
 }
 
@@ -790,6 +809,7 @@ export async function submitV1ImageDetectSync(
   fd.append('bbox', JSON.stringify(bbox))
   appendDocumentTime(fd, opts?.document_time)
   appendImageCreatedAt(fd, opts?.image_created_at)
+  appendBatch(fd, opts?.batch)
   const res = await fetch(aiDetectionUrl('/api/v1/image-detection/detect'), {
     method: 'POST',
     body: fd,
@@ -1023,6 +1043,8 @@ export interface DetectionHistoryApiRecord {
   original_filename?: string | null
   image_url?: string | null
   image_created_at?: string | null
+  /** 批次号，格式 YYYYMMDD+序号（如 202601021） */
+  batch?: string | null
   bbox?: unknown
   status: string
   outcome?: DetectionHistoryOutcome | null
@@ -1090,6 +1112,10 @@ function coerceApiRecord(raw: Record<string, unknown>): DetectionHistoryApiRecor
       : typeof raw.imageCreatedAt === 'string'
         ? raw.imageCreatedAt
         : null
+  const batch =
+    typeof raw.batch === 'string'
+      ? raw.batch
+      : null
   let outcome: DetectionHistoryOutcome | null = null
   const oc = raw.outcome
   if (isRecord(oc)) {
@@ -1139,6 +1165,7 @@ function coerceApiRecord(raw: Record<string, unknown>): DetectionHistoryApiRecor
     original_filename: name,
     image_url: imageUrl,
     image_created_at: imageCreatedAt,
+    batch,
     bbox: raw.bbox,
     status: st,
     outcome,
@@ -1290,6 +1317,8 @@ export type RuleChecksData = {
   suggested_rois?: SuggestedRoi[] | null
   hard_tamper_flags?: Record<string, boolean>
   reason?: string
+  /** 批次号，后端自动生成或透传前端传入值 */
+  batch?: string | null
 }
 
 function mergeReasons(message: unknown, reasons: unknown): string[] | undefined {
@@ -1420,8 +1449,11 @@ function ruleCheckDataLayer(json: unknown): Record<string, unknown> {
 
 function normalizeRuleChecksJson(json: unknown): RuleChecksData {
   const o = ruleCheckDataLayer(json)
+  const batch =
+    (isRecord(json) && typeof json.batch === 'string' ? json.batch.trim() : null) ??
+    (isRecord(o) && typeof o.batch === 'string' ? (o as Record<string, unknown>).batch as string : null)
   const linked = normalizeLinkedRuleChecksObject(o)
-  if (linked) return linked
+  if (linked) return { ...linked, batch: batch || linked.batch }
   return {
     pixel_overlap: normalizePixelOverlapBlock(o.pixel_overlap),
     pixel_overlap_source:
@@ -1434,6 +1466,7 @@ function normalizeRuleChecksJson(json: unknown): RuleChecksData {
       ? (o.hard_tamper_flags as Record<string, boolean>)
       : undefined,
     reason: typeof o.reason === 'string' ? o.reason : undefined,
+    batch: batch || null,
   }
 }
 
@@ -1475,6 +1508,7 @@ async function postRuleCheckMultipart(
   }
   appendDocumentTime(fd, opts?.document_time)
   appendImageCreatedAt(fd, opts?.image_created_at)
+  appendBatch(fd, opts?.batch)
   const taskId = typeof opts?.task_id === 'string' ? opts.task_id.trim() : ''
   if (taskId) fd.append('task_id', taskId)
   const res = await fetch(aiDetectionUrl(path), {
@@ -1512,6 +1546,7 @@ export async function submitPixelOverlapCheck(
   fd.append('bbox', JSON.stringify(bbox))
   appendDocumentTime(fd, opts?.document_time)
   appendImageCreatedAt(fd, opts?.image_created_at)
+  appendBatch(fd, opts?.batch)
   const res = await fetch(aiDetectionUrl('/api/v1/pixel-overlap/check'), {
     method: 'POST',
     body: fd,
@@ -1534,6 +1569,7 @@ export async function submitTimestampCheck(
   fd.append('file', file)
   appendDocumentTime(fd, opts?.document_time)
   appendImageCreatedAt(fd, opts?.image_created_at)
+  appendBatch(fd, opts?.batch)
   const res = await fetch(aiDetectionUrl('/api/v1/timestamp/check'), {
     method: 'POST',
     body: fd,
@@ -1679,6 +1715,8 @@ export interface HistoryExportRequest {
   status?: string
   match_mode?: HistoryExportMatchMode
   image_variant?: HistoryExportImageVariant
+  /** 批次号筛选，如 "20260626-001"；不传表示全部 */
+  batch?: string | null
 }
 
 export interface HistoryExportPreviewItem {
@@ -1688,6 +1726,8 @@ export interface HistoryExportPreviewItem {
   task_id?: string | null
   original_filename?: string | null
   image_created_at?: string | null
+  /** 批次号，格式 YYYYMMDD+序号（如 202601021） */
+  batch?: string | null
   status: string
   detection_result: string
   detection_results_all?: string[]

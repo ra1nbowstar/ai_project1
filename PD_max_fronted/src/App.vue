@@ -86,6 +86,8 @@ const userBbox = ref<BboxXYXY | null>(null)
 const busy = ref(false)
 const pollStatus = ref('')
 const errorMsg = ref<string | null>(null)
+/** 批次号：根据历史记录当天最大序号+1 生成；同批多张图共享 */
+const currentBatch = ref<string | null>(null)
 
 /** 当前检测任务的标注状态（correct / wrong / suspicious / null） */
 const currentTaskFeedbackStatus = ref<FeedbackJudgment | null>(null)
@@ -207,6 +209,8 @@ const managedHistoryActionBusy = ref<Record<string, boolean>>({})
 
 const exportDateFrom = ref('')
 const exportDateTo = ref('')
+/** 批次序号筛选（可选），仅填数字，日期取自上方检测时间起始日期 */
+const exportBatchSeq = ref('')
 const exportDetectionResults = ref<HistoryExportDetectionResult[]>([])
 const exportImageVariant = ref<HistoryExportImageVariant>('original')
 const exportPreviewLoading = ref(false)
@@ -215,6 +219,7 @@ const exportPreview = ref<HistoryExportPreviewResult | null>(null)
 const exportZipBusy = ref(false)
 /** 最近一次 ZIP 下载的服务端统计（响应头） */
 const exportDownloadHint = ref<string | null>(null)
+
 
 const viewingHistoryId = ref<string | null>(null)
 /** 当前正在查看的历史记录条目（点击历史列表时直接存入，不从数组查找） */
@@ -453,6 +458,7 @@ function detectSubmitOpts(signal: AbortSignal, withRuleChecks = false, imageCrea
     document_time: t || null,
     with_rule_checks: withRuleChecks,
     image_created_at: finalImageCreatedAt,
+    batch: currentBatch.value || null,
   }
 }
 
@@ -790,17 +796,19 @@ async function removeManagedHistory(entry: DetectionHistoryEntry) {
 /** 默认与历史列表 retention 一致：最近 7 天 */
 function initExportDateDefault() {
   if (exportDateFrom.value && exportDateTo.value) return
+  const pad = (n: number) => String(n).padStart(2, '0')
   const now = new Date()
   const start = new Date(now)
   start.setDate(start.getDate() - 7)
-  exportDateFrom.value = start.toISOString().slice(0, 10)
-  exportDateTo.value = now.toISOString().slice(0, 10)
+  exportDateFrom.value = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T00:00`
+  exportDateTo.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T23:59`
 }
 
 function dateToExportDatetime(dateStr: string, endOfDay: boolean): string {
   const d = dateStr.trim()
   if (!d) return ''
-  return endOfDay ? `${d}T23:59:59` : `${d}T00:00:00`
+  if (d.includes('T')) return d
+  return endOfDay ? `${d}T23:59` : `${d}T00:00`
 }
 
 function buildHistoryExportRequest(): HistoryExportRequest {
@@ -813,6 +821,14 @@ function buildHistoryExportRequest(): HistoryExportRequest {
   }
   if (exportDetectionResults.value.length) {
     body.detection_results = [...exportDetectionResults.value]
+  }
+  const seq = exportBatchSeq.value.trim()
+  if (seq && /^\d+$/.test(seq)) {
+    const d = exportDateFrom.value.trim()
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (m) {
+      body.batch = `${m[1]}${m[2]}${m[3]}${seq}`
+    }
   }
   return body
 }
@@ -998,6 +1014,7 @@ async function runRuleSingle(file: File) {
 
   busy.value = true
   errorMsg.value = null
+  currentBatch.value = generateNextBatch()
   viewingHistoryId.value = null
   v3Payload.value = null
   v3TaskId.value = null
@@ -1072,6 +1089,7 @@ async function runRuleBatch(batchFiles: File[]) {
 
   busy.value = true
   errorMsg.value = null
+  currentBatch.value = generateNextBatch()
   viewingHistoryId.value = null
   v3Payload.value = null
   v3TaskId.value = null
@@ -1654,6 +1672,34 @@ function truncateName(name: string, max = 18) {
   return `${name.slice(0, max - 1)}…`
 }
 
+/** 从批次号（格式 YYYYMMDD+序号，如 202601021）中提取序号部分 */
+function formatBatchShort(batch: string | null | undefined): string {
+  if (!batch || batch.length <= 8) return batch || '—'
+  return batch.slice(8)
+}
+
+/** 从历史记录中推断下一个批次号：当天日期 + 最大序号 + 1，无当天记录则从 1 开始 */
+function generateNextBatch(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const datePrefix = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+  let maxSeq = 0
+  // 从已加载的历史列表中查找当天批次的最大序号
+  for (const e of historyEntries.value) {
+    const b = e.batch
+    if (b && b.startsWith(datePrefix)) {
+      const seq = parseInt(b.slice(8), 10)
+      if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq
+    }
+  }
+  // 如果当前会话已有批次号，也纳入比较（避免重复）
+  if (currentBatch.value && currentBatch.value.startsWith(datePrefix)) {
+    const seq = parseInt(currentBatch.value.slice(8), 10)
+    if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq
+  }
+  return `${datePrefix}${maxSeq + 1}`
+}
+
 /** 切换 suggested_rois 列表中某个 ROI 的勾选状态 */
 function toggleRoiIndex(idx: number) {
   const arr = selectedRoiIndices.value
@@ -2014,6 +2060,7 @@ async function runV3() {
 
   busy.value = true
   errorMsg.value = null
+  currentBatch.value = generateNextBatch()
   viewingHistoryId.value = null
   v3Payload.value = null
   v3TaskId.value = null
@@ -2064,12 +2111,13 @@ async function runV3() {
 async function runV3Batch(files: File[]) {
   if (!files.length) return
   if (v3SpecifyBbox.value) {
-    errorMsg.value = '批量检测暂不支持“仅分析框选区域”，请关闭后重试。'
+    errorMsg.value = '批量检测暂不支持”仅分析框选区域”，请关闭后重试。'
     return
   }
   const runRule = useRuleDetection.value
   busy.value = true
   errorMsg.value = null
+  currentBatch.value = generateNextBatch()
   viewingHistoryId.value = null
   v3Payload.value = null
   v3TaskId.value = null
@@ -2977,6 +3025,7 @@ onUnmounted(() => {
                   truncateName(h.fileName)
                 }}</span>
                 <span class="history-file-time">{{ h.imageCreatedAt || '—' }}</span>
+                <span v-if="h.batch" class="history-batch">批次：{{ formatBatchShort(h.batch) }}</span>
                 <span class="pill sm history-pill" :class="historyPillClass(h)">{{
                   historyResultLabel(h)
                 }}</span>
@@ -3337,23 +3386,36 @@ onUnmounted(() => {
             <h3 class="section-title tight">鉴伪历史导出</h3>
           </div>
           <p class="export-hint">
-            按时间范围筛选鉴伪历史，先预览统计再打包下载 ZIP（含 manifest 与图片）。默认日期为最近 7 天，与历史列表保留范围一致。
+            按时间范围筛选鉴伪历史，先预览统计再打包下载 ZIP（含 manifest 与图片）。默认日期为最近 7 天，精确到秒；可选批次号精确筛选。
           </p>
           <div class="manage-date-filter-wrap">
             <span class="filter-label">检测时间：</span>
           </div>
           <div class="manage-date-filter-controls">
             <input
-              type="date"
+              type="datetime-local"
               class="filter-date-input"
+              step="1"
               v-model="exportDateFrom"
             />
             <span class="filter-date-sep">~</span>
             <input
-              type="date"
+              type="datetime-local"
               class="filter-date-input"
+              step="1"
               v-model="exportDateTo"
             />
+          </div>
+          <div class="manage-filter-row export-filter-block">
+            <span class="filter-label">批次号：</span>
+            <input
+              type="text"
+              class="filter-batch-input"
+              v-model="exportBatchSeq"
+              inputmode="numeric"
+              placeholder="填写序号，如 1，留空表示全部"
+            />
+            <span class="export-filter-note">（日期取上方检测时间起始日）</span>
           </div>
           <div class="manage-filter-row export-filter-block">
             <span class="filter-label">鉴伪结论：</span>
@@ -3446,6 +3508,7 @@ onUnmounted(() => {
                     :class="item.feedback_status"
                   >{{ exportFeedbackStatusLabel(item.feedback_status) }}</span>
                   <span v-if="!item.has_image" class="history-kind">无图</span>
+                  <span v-if="item.batch" class="history-kind">批次：{{ formatBatchShort(item.batch) }}</span>
                   <span class="feedback-row-time">{{ formatHistoryTime(item.created_at) }}</span>
                 </span>
                 <span class="history-file" :title="item.original_filename || ''">{{
@@ -3500,6 +3563,7 @@ onUnmounted(() => {
                 </span>
                 <span class="history-file">{{ entry.fileName }}</span>
                 <span class="history-file-time">{{ entry.imageCreatedAt || '—' }}</span>
+                <span v-if="entry.batch" class="history-batch">批次：{{ formatBatchShort(entry.batch) }}</span>
               </button>
               <button
                 type="button"
@@ -3533,6 +3597,7 @@ onUnmounted(() => {
                 <dl class="manage-facts">
                   <div><dt>文件</dt><dd>{{ selectedManagedHistory.fileName }}</dd></div>
                   <div><dt>修改时间</dt><dd>{{ selectedManagedHistory.imageCreatedAt || '—' }}</dd></div>
+                  <div v-if="selectedManagedHistory.batch"><dt>批次</dt><dd>{{ formatBatchShort(selectedManagedHistory.batch) }}</dd></div>
                   <div><dt>任务</dt><dd>{{ selectedManagedHistory.taskId || '—' }}</dd></div>
                   <div><dt>结果</dt><dd>{{ historyResultLabel(selectedManagedHistory) }}</dd></div>
                   <div><dt>类型</dt><dd>{{ historyKindLabel(selectedManagedHistory) || '—' }}</dd></div>
@@ -3855,6 +3920,27 @@ onUnmounted(() => {
 .filter-date-input:focus {
   border-color: var(--brand);
   outline: none;
+}
+
+.filter-batch-input {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.55rem;
+  width: 100px;
+}
+
+.filter-batch-input:focus {
+  border-color: var(--brand);
+  outline: none;
+}
+
+.filter-batch-input::placeholder {
+  color: #94a3b8;
+  font-size: 0.7rem;
 }
 
 .filter-date-sep {
@@ -5037,6 +5123,17 @@ onUnmounted(() => {
   font-size: 0.68rem;
   color: #94a3b8;
   line-height: 1.3;
+}
+
+.history-batch {
+  display: inline-block;
+  font-size: 0.68rem;
+  color: #6366f1;
+  background: #eef2ff;
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 1.4;
+  margin-right: 6px;
 }
 
 .history-pill {
