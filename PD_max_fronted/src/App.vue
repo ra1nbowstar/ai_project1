@@ -1456,12 +1456,17 @@ const previewLightboxSrc = ref('')
 const previewLightboxStageRef = ref<HTMLElement | null>(null)
 const lightboxImgRef = ref<HTMLImageElement | null>(null)
 const lightboxImgNatural = ref({ w: 0, h: 0 })
+const lightboxScale = ref(1)
+const LIGHTBOX_SCALE_MIN = 0.25
+const LIGHTBOX_SCALE_MAX = 5
+const LIGHTBOX_SCALE_STEP = 0.25
 
 function openPreviewLightbox(src?: string) {
   const target = (src ?? activePreviewUrl.value ?? '').trim()
   if (!target) return
   previewLightboxSrc.value = target
   previewLightboxOpen.value = true
+  lightboxScale.value = 1
   // 若与当前预览图片同源，直接复用已知尺寸
   if (target === activePreviewUrl.value && imageNatural.value.w > 0) {
     lightboxImgNatural.value = { w: imageNatural.value.w, h: imageNatural.value.h }
@@ -1469,6 +1474,7 @@ function openPreviewLightbox(src?: string) {
     lightboxImgNatural.value = { w: 0, h: 0 }
   }
   window.addEventListener('keydown', onPreviewLightboxKeydown)
+  window.addEventListener('wheel', onLightboxWheel, { passive: false })
   nextTick(() => {
     const stage = previewLightboxStageRef.value
     if (!stage) return
@@ -1481,7 +1487,9 @@ function closePreviewLightbox() {
   previewLightboxOpen.value = false
   previewLightboxSrc.value = ''
   lightboxImgNatural.value = { w: 0, h: 0 }
+  lightboxScale.value = 1
   window.removeEventListener('keydown', onPreviewLightboxKeydown)
+  window.removeEventListener('wheel', onLightboxWheel)
 }
 
 function onLightboxImgLoad() {
@@ -1493,6 +1501,19 @@ function onLightboxImgLoad() {
 
 function onPreviewLightboxKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') closePreviewLightbox()
+}
+
+function onLightboxWheel(e: WheelEvent) {
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+  const delta = -Math.sign(e.deltaY) * LIGHTBOX_SCALE_STEP
+  lightboxScale.value = Math.min(LIGHTBOX_SCALE_MAX, Math.max(LIGHTBOX_SCALE_MIN, lightboxScale.value + delta))
+}
+
+function onLightboxImgClick() {
+  lightboxScale.value = lightboxScale.value >= 2
+    ? 1
+    : lightboxScale.value + 0.5
 }
 
 function onPreviewImgClick() {
@@ -3645,13 +3666,15 @@ onUnmounted(() => {
           ×
         </button>
         <div ref="previewLightboxStageRef" class="preview-lightbox-stage">
-          <div class="preview-lightbox-img-wrap">
+          <div class="preview-lightbox-img-wrap" :style="{ transform: `scale(${lightboxScale})`, transformOrigin: 'top left' }">
             <img
               ref="lightboxImgRef"
               :src="previewLightboxSrc"
               alt=""
               class="preview-lightbox-img"
+              :class="{ 'preview-lightbox-img-zoomable': lightboxScale < LIGHTBOX_SCALE_MAX }"
               @load="onLightboxImgLoad"
+              @click.stop="onLightboxImgClick"
             />
             <svg
               v-if="lightboxImgNatural.w && suggestedRoiRenderRects.length"
@@ -3700,7 +3723,7 @@ onUnmounted(() => {
             </svg>
           </div>
         </div>
-        <p class="preview-lightbox-hint">点击背景或 × 关闭，按 Esc 退出</p>
+        <p class="preview-lightbox-hint">点击图片缩放 | Ctrl+滚轮缩放 | 点击背景或 × 关闭 | Esc 退出</p>
       </div>
     </Teleport>
   </div>
@@ -6221,6 +6244,7 @@ onUnmounted(() => {
   display: inline-block;
   line-height: 0;
   min-width: 100%;
+  transition: transform 200ms ease-out;
 }
 
 .preview-lightbox-overlay {
@@ -6239,6 +6263,10 @@ onUnmounted(() => {
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+}
+
+.preview-lightbox-img-zoomable {
+  cursor: zoom-in;
 }
 
 .preview-lightbox-close {
