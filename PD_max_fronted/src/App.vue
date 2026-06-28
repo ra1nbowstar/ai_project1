@@ -1462,14 +1462,16 @@ const LIGHTBOX_SCALE_MAX = 5
 const LIGHTBOX_SCALE_STEP = 0.25
 
 function computeFitScale(): number {
+  const imgW = lightboxImgNatural.value.w
+  const imgH = lightboxImgNatural.value.h
+  if (!imgW || !imgH) return 1
   const stage = previewLightboxStageRef.value
   const stageW = stage?.clientWidth ?? window.innerWidth
   const stageH = stage?.clientHeight ?? window.innerHeight
-  const imgW = lightboxImgNatural.value.w || 1
-  const imgH = lightboxImgNatural.value.h || 1
   const padW = Math.max(0, stageW - 32)
   const padH = Math.max(0, stageH - 32)
-  return Math.min(1, padW / imgW, padH / imgH)
+  // 允许放大（最大3倍），小图也能填满视口
+  return Math.min(3, padW / imgW, padH / imgH)
 }
 
 function openPreviewLightbox(src?: string) {
@@ -1487,12 +1489,12 @@ function openPreviewLightbox(src?: string) {
     lightboxImgNatural.value = { w: 0, h: 0 }
   }
   window.addEventListener('keydown', onPreviewLightboxKeydown)
-  window.addEventListener('wheel', onLightboxWheel, { passive: false })
   nextTick(() => {
     const stage = previewLightboxStageRef.value
     if (!stage) return
     stage.scrollTop = 0
     stage.scrollLeft = 0
+    stage.addEventListener('wheel', onLightboxWheel, { passive: false })
   })
 }
 
@@ -1502,7 +1504,8 @@ function closePreviewLightbox() {
   lightboxImgNatural.value = { w: 0, h: 0 }
   lightboxScale.value = 1
   window.removeEventListener('keydown', onPreviewLightboxKeydown)
-  window.removeEventListener('wheel', onLightboxWheel)
+  const stage = previewLightboxStageRef.value
+  if (stage) stage.removeEventListener('wheel', onLightboxWheel)
 }
 
 function onLightboxImgLoad() {
@@ -1519,36 +1522,24 @@ function onPreviewLightboxKeydown(e: KeyboardEvent) {
 }
 
 function onLightboxWheel(e: WheelEvent) {
-  // 普通滚轮即可缩放，Ctrl+滚轮更精细
+  if (!e.ctrlKey && !e.metaKey) return
   e.preventDefault()
-  const step = e.ctrlKey || e.metaKey ? LIGHTBOX_SCALE_STEP * 0.5 : LIGHTBOX_SCALE_STEP
-  const delta = -Math.sign(e.deltaY) * step
+  const delta = -Math.sign(e.deltaY) * LIGHTBOX_SCALE_STEP
   lightboxScale.value = Math.min(LIGHTBOX_SCALE_MAX, Math.max(LIGHTBOX_SCALE_MIN, lightboxScale.value + delta))
 }
 
 function onLightboxImgClick() {
-  // 三档循环：适应屏幕 → 1:1 原始像素 → 2x → 适应屏幕…
   const fitScale = computeFitScale()
   if (Math.abs(lightboxScale.value - fitScale) < 0.01) {
-    lightboxScale.value = 1  // 适应 → 原始大小
-  } else if (Math.abs(lightboxScale.value - 1) < 0.01) {
-    lightboxScale.value = Math.min(LIGHTBOX_SCALE_MAX, 2)  // 原始 → 2x
+    lightboxScale.value = Math.min(LIGHTBOX_SCALE_MAX, fitScale * 2)
   } else {
-    lightboxScale.value = fitScale  // 回到适应
+    lightboxScale.value = fitScale
   }
-  nextTick(() => {
-    const stage = previewLightboxStageRef.value
-    if (stage) { stage.scrollTop = 0; stage.scrollLeft = 0 }
-  })
 }
 
 function onPreviewImgClick() {
   if (v3SpecifyBbox.value || busy.value) return
-  // 使用当前实际显示的图片 URL，而非总是 activePreviewUrl
-  const actualSrc = (viewingHistoryId.value && historyPreviewUrl.value)
-    ? historyPreviewUrl.value
-    : activePreviewUrl.value || ''
-  openPreviewLightbox(actualSrc)
+  openPreviewLightbox(activePreviewUrl.value || '')
 }
 
 const userBboxXYWH = computed(() => {
@@ -2512,16 +2503,16 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="activePreviewUrl || (viewingHistoryId && historyPreviewUrl)"
+            v-if="activePreviewUrl"
             class="stage"
             @mouseleave="drawing ? onDrawUp() : null"
           >
             <img
               ref="imgRef"
-              :src="(viewingHistoryId && historyPreviewUrl ? historyPreviewUrl : activePreviewUrl) || undefined"
+              :src="activePreviewUrl || undefined"
               alt="待检测图片"
               class="preview-img"
-              :class="{ 'preview-img-zoomin': !viewingHistoryId && !v3SpecifyBbox && !busy }"
+              :class="{ 'preview-img-zoomin': !v3SpecifyBbox && !busy }"
               draggable="false"
               @load="onImgLoad"
               @error="onImgError"
@@ -2644,7 +2635,7 @@ onUnmounted(() => {
             />
           </div>
 
-          <div v-if="files.length && !viewingHistoryId" class="preview-file-info">
+          <div v-if="files.length" class="preview-file-info">
             <div class="preview-file-name" :title="files[selectedUploadIndex]?.name">
               📄 {{ files[selectedUploadIndex]?.name || '-' }}
             </div>
@@ -2652,15 +2643,6 @@ onUnmounted(() => {
               <span>{{ files[selectedUploadIndex] ? formatFileSize(files[selectedUploadIndex]!.size) : '-' }}</span>
               <span class="preview-file-info-sep">·</span>
               <span>{{ selectedFileImageCreatedAt || '-' }}</span>
-            </div>
-          </div>
-
-          <div v-else-if="viewingHistoryEntry" class="preview-file-info">
-            <div class="preview-file-name" :title="viewingHistoryEntry.fileName">
-              📄 {{ viewingHistoryEntry.fileName }}
-            </div>
-            <div class="preview-file-meta-row">
-              <span>{{ viewingHistoryEntry.imageCreatedAt || '—' }}</span>
             </div>
           </div>
 
@@ -3696,7 +3678,7 @@ onUnmounted(() => {
           ×
         </button>
         <div ref="previewLightboxStageRef" class="preview-lightbox-stage">
-          <div class="preview-lightbox-img-wrap" :style="{ transform: `scale(${lightboxScale})`, transformOrigin: 'top left' }">
+          <div class="preview-lightbox-img-wrap" :style="{ transform: `scale(${lightboxScale})` }">
             <img
               ref="lightboxImgRef"
               :src="previewLightboxSrc"
@@ -6273,7 +6255,8 @@ onUnmounted(() => {
   position: relative;
   display: inline-block;
   line-height: 0;
-  transition: transform 200ms ease-out;
+  transform-origin: top left;
+  transition: transform 150ms ease-out;
 }
 
 .preview-lightbox-overlay {
@@ -6285,12 +6268,8 @@ onUnmounted(() => {
 .preview-lightbox-img {
   display: block;
   margin: 0;
-  /* 默认适应视口：小图不拉伸，大图不溢出 */
-  max-width: 96vw;
-  max-height: calc(100vh - 8rem);
   width: auto;
   height: auto;
-  object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
 }
