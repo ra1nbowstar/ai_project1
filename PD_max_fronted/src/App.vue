@@ -1461,15 +1461,28 @@ const LIGHTBOX_SCALE_MIN = 0.25
 const LIGHTBOX_SCALE_MAX = 5
 const LIGHTBOX_SCALE_STEP = 0.25
 
+function computeFitScale(): number {
+  const stage = previewLightboxStageRef.value
+  const stageW = stage?.clientWidth ?? window.innerWidth
+  const stageH = stage?.clientHeight ?? window.innerHeight
+  const imgW = lightboxImgNatural.value.w || 1
+  const imgH = lightboxImgNatural.value.h || 1
+  const padW = Math.max(0, stageW - 32)
+  const padH = Math.max(0, stageH - 32)
+  return Math.min(1, padW / imgW, padH / imgH)
+}
+
 function openPreviewLightbox(src?: string) {
   const target = (src ?? activePreviewUrl.value ?? '').trim()
   if (!target) return
   previewLightboxSrc.value = target
   previewLightboxOpen.value = true
-  lightboxScale.value = 1
+  // 默认适应屏幕；图片加载后会触发 onLightboxImgLoad 重新计算
+  lightboxScale.value = computeFitScale()
   // 若与当前预览图片同源，直接复用已知尺寸
   if (target === activePreviewUrl.value && imageNatural.value.w > 0) {
     lightboxImgNatural.value = { w: imageNatural.value.w, h: imageNatural.value.h }
+    lightboxScale.value = computeFitScale()
   } else {
     lightboxImgNatural.value = { w: 0, h: 0 }
   }
@@ -1497,6 +1510,8 @@ function onLightboxImgLoad() {
   lightboxImgNatural.value = el
     ? { w: el.naturalWidth, h: el.naturalHeight }
     : { w: 0, h: 0 }
+  // 图片加载后自动计算适应屏幕的缩放
+  nextTick(() => { lightboxScale.value = computeFitScale() })
 }
 
 function onPreviewLightboxKeydown(e: KeyboardEvent) {
@@ -1504,21 +1519,36 @@ function onPreviewLightboxKeydown(e: KeyboardEvent) {
 }
 
 function onLightboxWheel(e: WheelEvent) {
-  if (!e.ctrlKey && !e.metaKey) return
+  // 普通滚轮即可缩放，Ctrl+滚轮更精细
   e.preventDefault()
-  const delta = -Math.sign(e.deltaY) * LIGHTBOX_SCALE_STEP
+  const step = e.ctrlKey || e.metaKey ? LIGHTBOX_SCALE_STEP * 0.5 : LIGHTBOX_SCALE_STEP
+  const delta = -Math.sign(e.deltaY) * step
   lightboxScale.value = Math.min(LIGHTBOX_SCALE_MAX, Math.max(LIGHTBOX_SCALE_MIN, lightboxScale.value + delta))
 }
 
 function onLightboxImgClick() {
-  lightboxScale.value = lightboxScale.value >= 2
-    ? 1
-    : lightboxScale.value + 0.5
+  // 三档循环：适应屏幕 → 1:1 原始像素 → 2x → 适应屏幕…
+  const fitScale = computeFitScale()
+  if (Math.abs(lightboxScale.value - fitScale) < 0.01) {
+    lightboxScale.value = 1  // 适应 → 原始大小
+  } else if (Math.abs(lightboxScale.value - 1) < 0.01) {
+    lightboxScale.value = Math.min(LIGHTBOX_SCALE_MAX, 2)  // 原始 → 2x
+  } else {
+    lightboxScale.value = fitScale  // 回到适应
+  }
+  nextTick(() => {
+    const stage = previewLightboxStageRef.value
+    if (stage) { stage.scrollTop = 0; stage.scrollLeft = 0 }
+  })
 }
 
 function onPreviewImgClick() {
   if (v3SpecifyBbox.value || busy.value) return
-  openPreviewLightbox(activePreviewUrl.value || '')
+  // 使用当前实际显示的图片 URL，而非总是 activePreviewUrl
+  const actualSrc = (viewingHistoryId.value && historyPreviewUrl.value)
+    ? historyPreviewUrl.value
+    : activePreviewUrl.value || ''
+  openPreviewLightbox(actualSrc)
 }
 
 const userBboxXYWH = computed(() => {
@@ -3723,7 +3753,7 @@ onUnmounted(() => {
             </svg>
           </div>
         </div>
-        <p class="preview-lightbox-hint">点击图片缩放 | Ctrl+滚轮缩放 | 点击背景或 × 关闭 | Esc 退出</p>
+        <p class="preview-lightbox-hint">滚轮缩放 | 点击图片 适应/原始/2x 三档切换 | 点背景或 × 关闭 | Esc 退出</p>
       </div>
     </Teleport>
   </div>
@@ -6243,7 +6273,6 @@ onUnmounted(() => {
   position: relative;
   display: inline-block;
   line-height: 0;
-  min-width: 100%;
   transition: transform 200ms ease-out;
 }
 
@@ -6254,12 +6283,13 @@ onUnmounted(() => {
 }
 
 .preview-lightbox-img {
-  max-width: none;
-  max-height: none;
-  width: min(160vw, 1600px);
-  height: auto;
   display: block;
   margin: 0;
+  /* 默认适应视口：小图不拉伸，大图不溢出 */
+  max-width: 96vw;
+  max-height: calc(100vh - 8rem);
+  width: auto;
+  height: auto;
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
